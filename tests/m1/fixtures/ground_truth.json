@@ -1,0 +1,67 @@
+{
+  "_description": "Ground-truth for sample_paper.{pdf,docx,txt}",
+  "expected_reference_count": 2,
+  "expected_references": [
+    {
+      "doi": "10.1038/nature14539",
+      "title": "Deep learning.",
+      "year": 2015
+    },
+    {
+      "doi": "10.5555/3295222.3295349",
+      "title": "Attention is all you need.",
+      "year": 2017
+    }
+  ],
+  "expected_citation_markers": {
+    "Deep learning has revolutionized": [
+      "[1]"
+    ],
+    "Transformer architectures": [
+      "[2]"
+    ],
+    "Smith et al., 2020": [
+      "(Smith et al., 2020)"
+    ],
+    "pre-training on large corpora": [
+      "[1]",
+      "[2]"
+    ],
+    "20% improvement": [
+      "[2]"
+    ]
+  },
+  "expected_claims_containing": [
+    {
+      "text_fragment": "30%",
+      "claim_type": "numeric",
+      "numbers_mentioned_includes": "30%"
+    },
+    {
+      "text_fragment": "15%",
+      "claim_type": "numeric",
+      "numbers_mentioned_includes": "15%"
+    },
+    {
+      "text_fragment": "transfer learning is effective",
+      "claim_type": "conclusion"
+    },
+    {
+      "text_fragment": "Adam optimiser",
+      "claim_type": "numeric"
+    },
+    {
+      "text_fragment": "50,000 annotated sentences",
+      "claim_type": "methodological"
+    },
+    {
+      "text_fragment": "20% improvement",
+      "claim_type": "numeric",
+      "numbers_mentioned_includes": "20%"
+    }
+  ],
+  "expected_warnings_pasted_text": [
+    "reference_list_not_found"
+  ],
+  "note_reference_list_not_found": "Only appears when no REFERENCES header present. Sample text HAS a header so this warning should NOT appear for sample_paper.txt"
+}

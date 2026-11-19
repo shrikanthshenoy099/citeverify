@@ -46,7 +46,7 @@ _NUMBERED_SPLIT_RE = re.compile(r"(?m)(?:^|\n)(?:\[(\d+)\]|\((\d+)\)|(\d+)[\.\)]
 _AUTHORYEAR_SPLIT_RE = re.compile(r"(?m)\n(?=[A-Z][a-zA-Zéàüö\-']+,\s+[A-Z])")
 
 # DOI extractor
-_DOI_RE = re.compile(r"\b(?:doi[:\s]*|https?://doi\.org/)([^\s,;\"\']+)", re.IGNORECASE)
+_DOI_RE = re.compile(r"\b(?:doi[:\s]+(?=10\.)|https?://doi\.org/)([^\s,;\"\']+)", re.IGNORECASE)
 
 # Year extractor (4-digit 1800–2099)
 _YEAR_RE = re.compile(r"\b(1[89]\d{2}|20\d{2})\b")
@@ -84,7 +84,10 @@ _REF_SYSTEM_PROMPT = (
 
 def _extract_doi(text: str) -> Optional[str]:
     m = _DOI_RE.search(text)
-    return m.group(1).rstrip(".,;)") if m else None
+    if not m:
+        return None
+    doi = m.group(1).rstrip(".,;)")
+    return doi.lower()  # normalize to lowercase per spec B.8
 
 
 def _extract_year(text: str) -> Optional[int]:

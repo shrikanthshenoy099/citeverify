@@ -104,7 +104,8 @@ def _extract_text_pdf(file_path: Path) -> tuple[str, list[int], list[str], froze
         over_limit = [p for p in skipped_ocr_pages if p > OCR_MAX_PAGES]
         below_limit = [p for p in skipped_ocr_pages if p <= OCR_MAX_PAGES]
         if below_limit:
-            warnings.append("scanned_pdf_ocr_unavailable")
+            # B.6: "scanned_pdf_no_text" is the canonical warning for image-only/scanned pages
+            warnings.append("scanned_pdf_no_text")
         if over_limit:
             warnings.append(
                 f"ocr_cap_reached:pages_beyond_{OCR_MAX_PAGES}_not_processed:{over_limit}"
@@ -224,11 +225,13 @@ def _segment_with_offsets(full_text: str) -> tuple[list[str], list[tuple[int, in
 
 def _build_ref_index(references: list, full_text: str) -> dict[str, str]:
     """
-    Build a simple marker -> reference_id mapping.
+    Build a marker -> reference_id mapping covering:
+      - Numeric:    [N], (N)
+      - Author-year (all canonical forms emitted by _extract_citation_markers):
+          (Surname YYYY), (Surname, YYYY), (Surname et al., YYYY),
+          (Surname et al. YYYY), (Surname et al., YYYY)  [narrative → parenthesised]
 
-    For numbered references: maps "[N]" or "(N)" to the Nth reference.
-    For author-year: tries to match author surname + year substrings.
-    This is a best-effort pass; unresolved markers are left with no_citation flag.
+    This is best-effort; unresolved markers get reference_not_found flag.
     """
     index: dict[str, str] = {}
     for i, ref in enumerate(references):
@@ -237,12 +240,22 @@ def _build_ref_index(references: list, full_text: str) -> dict[str, str]:
         for fmt in (f"[{n}]", f"({n})"):
             index[fmt] = ref.reference_id
 
-        # Author-year marker: "FirstAuthorSurname YYYY"
+        # Author-year marker variants
         if ref.authors and ref.year:
             surname = ref.authors[0].split(",")[0].strip().split()[-1]
-            index[f"({surname} {ref.year})"] = ref.reference_id
-            index[f"({surname} et al., {ref.year})"] = ref.reference_id
-            index[f"({surname} et al. {ref.year})"] = ref.reference_id
+            yr = ref.year
+            for fmt in (
+                f"({surname} {yr})",
+                f"({surname}, {yr})",
+                f"({surname} et al., {yr})",
+                f"({surname} et al. {yr})",
+                f"({surname} et al,  {yr})",
+            ):
+                index[fmt] = ref.reference_id
+            # Suffix variants (2020a, 2020b)
+            for suffix in "abcde":
+                index[f"({surname} {yr}{suffix})"] = ref.reference_id
+                index[f"({surname}, {yr}{suffix})"] = ref.reference_id
 
     return index
 
@@ -393,7 +406,7 @@ def parse_document(
     # ------------------------------------------------------------------
     references = parse_references(full_text, doc_id, ocr_page_indices=ocr_page_indices)
     if not references:
-        warnings.append("no_references_found")
+        warnings.append("reference_list_not_found")
 
     # ------------------------------------------------------------------
     # 4. Build maps
