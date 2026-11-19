@@ -282,7 +282,7 @@ class TestParseDocumentText:
     def test_no_reference_section_gives_warning(self):
         from citeverify_core.doc_intel.parser import parse_document
         result = parse_document(file_path=None, raw_text=SAMPLE_TEXT_NO_REFS, doc_id="test_doc4")
-        assert any("no_references_found" in w for w in result.warnings)
+        assert any("reference_list_not_found" in w for w in result.warnings)
 
     def test_raises_when_no_input(self):
         from citeverify_core.doc_intel.parser import parse_document
