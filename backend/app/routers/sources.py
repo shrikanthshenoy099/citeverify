@@ -113,7 +113,7 @@ def _ingest_and_reverify(reference_id: str, pdf_path: str) -> None:
                         source.flags.append(Flags.MANUAL_SOURCE)
                     _upsert_source(db, source)
             else:
-                from citeverify_core.retrieval.retriever import ingest_pdf  # type: ignore[import]
+                from citeverify_core.retrieval import ingest_pdf  # type: ignore[import]
                 source = ingest_pdf(reference_id=reference_id, pdf_path=pdf_path)
                 _upsert_source(db, source)
         except Exception as exc:

@@ -166,12 +166,19 @@ def retrieve_source(reference: Reference) -> Source:
         return _not_found_source(ref_id, flags=flags)
 
     # --- Match check ---
-    matched, match_score = is_matched(
-        reference,
-        meta.get("title", ""),
-        meta.get("authors", []),
-        meta.get("year"),
-    )
+    def _norm_doi(d):
+        return (d or "").lower().strip().replace("https://doi.org/", "").replace("http://doi.org/", "")
+
+    ref_doi = _norm_doi(reference.doi)
+    if ref_doi and ref_doi == _norm_doi(meta.get("doi")):
+        matched, match_score = True, 0.95   # identical DOI is stronger than a title match
+    else:
+        matched, match_score = is_matched(
+            reference,
+            meta.get("title", ""),
+            meta.get("authors", []),
+            meta.get("year"),
+        )
     if not matched:
         logger.info("Title match failed for %s (score=%.2f)", ref_id, match_score)
         flags = ["title_mismatch", "reference_not_found"]

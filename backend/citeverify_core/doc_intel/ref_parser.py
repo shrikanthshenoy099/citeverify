@@ -68,7 +68,7 @@ _REF_EXTRACTION_SCHEMA: dict = {
         "doi": {"type": ["string", "null"]},
         "venue": {"type": ["string", "null"]},
     },
-    "required": ["title", "authors", "year", "doi", "venue"],
+    "required": ["title"],
 }
 
 _REF_SYSTEM_PROMPT = (
