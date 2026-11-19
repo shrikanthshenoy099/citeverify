@@ -1,5 +1,5 @@
 # M2 – Source Retrieval dependencies
-# Python 3.11+ required (project standard).
+# Python 3.11+ required (project standard; tested on 3.12).
 # Install: pip install -r requirements-m2.txt
 
 # HTTP
@@ -9,12 +9,8 @@ urllib3==2.2.3
 # Fuzzy matching (title + quote location)
 rapidfuzz==3.9.7
 
-# Sentence embeddings  (all-MiniLM-L6-v2)
-# torch is a heavy dependency; install a CPU-only wheel unless you have a GPU.
-# See: https://pytorch.org/get-started/locally/
-sentence-transformers==3.3.1
-torch==2.5.1
-numpy==1.26.4
+# BM25 passage search (rank-bm25; replaces sentence-transformers/torch)
+rank-bm25==0.2.2
 
 # Sentence splitting (never crosses page boundaries)
 pysbd==0.3.4
@@ -27,3 +23,6 @@ rapidocr-onnxruntime==1.4.0
 
 # Pydantic v2 (shared schemas)
 pydantic==2.9.2
+
+# Numpy (used by BM25 and chunker word-count helpers)
+numpy==1.26.4

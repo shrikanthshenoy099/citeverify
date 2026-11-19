@@ -4,10 +4,8 @@ M2 – pytest test suite for backend/citeverify_core/retrieval/.
 Run from the repo root:
     pytest tests/m2/ -v
 
-No network calls, no GPU – everything is mocked or runs fully offline.
-pyproject.toml already sets pythonpath = ["backend"], so no manual sys.path
-manipulation is needed. The insert below is a belt-and-braces fallback for
-editors that run the file directly.
+No network calls – everything is mocked or runs fully offline.
+pyproject.toml sets pythonpath = ["backend"], so no manual sys.path needed.
 """
 from __future__ import annotations
 
@@ -48,8 +46,7 @@ from citeverify_core.retrieval.matcher import (
     title_ratio,
     year_matches,
 )
-from citeverify_core.retrieval.pdf_handler import PageText
-from citeverify_core.retrieval.retraction import _is_retracted
+from citeverify_core.retrieval.pdf_handler import PageText, _is_valid_pdf
 
 
 # ===========================================================================
@@ -71,8 +68,8 @@ def sample_reference() -> Reference:
 
 
 @pytest.fixture()
-def tmp_index_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect INDEX_DIR and SOURCES_DIR to a temp directory."""
+def tmp_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect INDEX_DIR, SOURCES_DIR to tmp_path."""
     monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
     monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
     monkeypatch.setattr("citeverify_core.retrieval.passage_search.INDEX_DIR", tmp_path / "index")
@@ -128,12 +125,11 @@ class TestMatcher:
         assert score >= 0.85
 
     def test_is_matched_title_only_above_92(self, sample_reference: Reference):
-        """High title ratio alone is sufficient even without author/year."""
         matched, score = is_matched(
             sample_reference,
             "Attention is All You Need",
-            [],  # no authors
-            None,  # no year
+            [],
+            None,
         )
         assert matched is True
 
@@ -259,14 +255,12 @@ class TestChunker:
         return [PageText(page_index=i, text=t, is_ocr=False) for i, t in enumerate(texts)]
 
     def test_basic_chunking(self):
-        # 300-word text should produce at least 1 chunk <= 250 words + overlap
         words = ["word"] * 300
         text = " ".join(words)
         pages = self._make_pages([text])
         chunks = build_chunks(pages, "ref_test")
         assert len(chunks) >= 1
         for c in chunks:
-            # Each chunk should not massively exceed the target
             assert len(c.text.split()) <= 350
 
     def test_no_cross_page(self):
@@ -276,7 +270,6 @@ class TestChunker:
         page_1_chunks = [c for c in chunks if c.page_index == 1]
         assert len(page_0_chunks) >= 1
         assert len(page_1_chunks) >= 1
-        # No chunk should contain text from both pages
         for c in page_0_chunks:
             assert "Other" not in c.text
         for c in page_1_chunks:
@@ -307,7 +300,6 @@ class TestChunker:
         assert all(c.is_ocr for c in chunks)
 
     def test_overlap_produces_duplicate_words(self):
-        """Consecutive chunks should share some words (overlap)."""
         words = " ".join([f"word{i}" for i in range(600)])
         pages = self._make_pages([words])
         chunks = build_chunks(pages, "ref_overlap")
@@ -318,62 +310,88 @@ class TestChunker:
 
 
 # ===========================================================================
-# 4. Indexer tests (using temp directory, no real embedding model)
+# 4. BM25 Indexer tests (no model needed)
 # ===========================================================================
 
 class TestIndexer:
-    def _fake_encode(self, texts: list[str], **kwargs) -> np.ndarray:
-        """Return random unit vectors so we can test cosine search logic."""
-        rng = np.random.default_rng(seed=42)
-        emb = rng.random((len(texts), 32)).astype(np.float32)
-        norms = np.linalg.norm(emb, axis=1, keepdims=True)
-        return emb / norms
+    def _build(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ref_id: str, texts: list[str]) -> list[Chunk]:
+        monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
+        monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
+        from citeverify_core.retrieval import indexer
+        chunks = [Chunk(f"{ref_id}_0_{i}", ref_id, 0, t, 0, False) for i, t in enumerate(texts)]
+        indexer.build_index(chunks, ref_id)
+        return chunks
 
     def test_build_and_load_index(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
-
         from citeverify_core.retrieval import indexer
-
-        mock_model = MagicMock()
-        mock_model.encode = self._fake_encode
-        monkeypatch.setattr(indexer, "_model", mock_model)
-
         chunks = [
             Chunk("ref1_0_0", "ref1", 0, "The quick brown fox jumps over the lazy dog.", 0, False),
             Chunk("ref1_0_1", "ref1", 0, "Machine learning is a subset of artificial intelligence.", 0, False),
         ]
         indexer.build_index(chunks, "ref1")
-
         result = indexer.load_index("ref1")
         assert result is not None
-        embeddings, metadata = result
-        assert embeddings.shape[0] == 2
+        corpus, metadata = result
+        assert len(corpus) == 2
         assert len(metadata) == 2
         assert metadata[0]["chunk_id"] == "ref1_0_0"
 
-    def test_cosine_search_returns_top_k(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_bm25_search_returns_top_k(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.passage_search.INDEX_DIR", tmp_path / "index")
-
         from citeverify_core.retrieval import indexer
-
-        mock_model = MagicMock()
-        mock_model.encode = self._fake_encode
-        monkeypatch.setattr(indexer, "_model", mock_model)
-
         chunks = [
-            Chunk(f"ref2_0_{i}", "ref2", 0, f"Text chunk number {i}.", 0, False)
+            Chunk(f"ref2_0_{i}", "ref2", 0, f"Text chunk number {i} about topic.", 0, False)
             for i in range(10)
         ]
         indexer.build_index(chunks, "ref2")
-        results = indexer.cosine_search("ref2", "some query", k=3)
+        results = indexer.cosine_search("ref2", "text chunk topic", k=3)
         assert len(results) <= 3
         for meta, score in results:
-            assert 0.0 <= score <= 1.0
+            assert 0.0 <= score < 1.0  # BM25 norm is [0, 1) not [0, 1]
 
-    def test_index_not_found_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_bm25_score_scale_documented(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Verify score normalisation: score 0 for no overlap, >0 for overlap, all in [0,1).
+
+        BM25 IDF is 0 when a term appears in ALL documents. With only 2 docs where
+        every term is unique, we need enough documents so that 'neural' appears in a
+        minority – that gives positive IDF and hence positive BM25 scores.
+        """
+        monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
+        monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
+        from citeverify_core.retrieval import indexer
+
+        # Build a larger corpus so IDF > 0 for query terms
+        chunks = [
+            Chunk("sc_0", "sc", 0, "neural network deep learning gradient descent optimizer training", 0, False),
+            Chunk("sc_1", "sc", 0, "banana apple orange fruit salad kitchen recipe cooking", 0, False),
+            Chunk("sc_2", "sc", 0, "database sql query table row column index transaction", 0, False),
+            Chunk("sc_3", "sc", 0, "music piano violin guitar symphony orchestra concert hall", 0, False),
+            Chunk("sc_4", "sc", 0, "ocean wave beach sand coral reef tide current", 0, False),
+        ]
+        indexer.build_index(chunks, "sc")
+
+        # Query exclusively about neural/ML; sc_0 must rank first
+        results = indexer.cosine_search("sc", "neural network deep learning", k=5)
+        scores = {m["chunk_id"]: s for m, s in results}
+        assert scores["sc_0"] > 0.0, "sc_0 should have a positive score for a matching query"
+        assert scores["sc_0"] > scores.get("sc_1", 0.0), "Neural chunk should outscore fruit chunk"
+
+        # All scores must be in [0, 1)
+        for _, s in results:
+            assert 0.0 <= s < 1.0
+
+        # Normalisation: raw / (raw + 1) → score for 0 raw = 0.0
+        from citeverify_core.retrieval.indexer import _normalise_score
+        assert _normalise_score(0.0) == 0.0
+        assert 0.49 < _normalise_score(1.0) < 0.51   # ~0.5
+        assert 0.90 < _normalise_score(10.0) < 0.92  # ~0.91
+        assert _normalise_score(1000.0) < 1.0
+
+    def test_index_not_found_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         from citeverify_core.retrieval import indexer
         result = indexer.load_index("nonexistent_ref")
@@ -394,28 +412,14 @@ class TestSearchPassages:
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.passage_search.INDEX_DIR", tmp_path / "index")
-
         from citeverify_core.retrieval import indexer
-
-        rng = np.random.default_rng(seed=0)
-
-        def fake_encode(texts_: list[str], **kwargs) -> np.ndarray:
-            emb = rng.random((len(texts_), 16)).astype(np.float32)
-            norms = np.linalg.norm(emb, axis=1, keepdims=True)
-            return emb / norms
-
-        monkeypatch.setattr(indexer, "_model", MagicMock(encode=fake_encode))
-
-        chunks = [
-            Chunk(f"{ref_id}_0_{i}", ref_id, 0, t, 0, False)
-            for i, t in enumerate(texts)
-        ]
+        chunks = [Chunk(f"{ref_id}_0_{i}", ref_id, 0, t, 0, False) for i, t in enumerate(texts)]
         indexer.build_index(chunks, ref_id)
 
     def test_returns_passages_up_to_k(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        self._build_index(tmp_path, monkeypatch, "refA", [f"Chunk {i}" for i in range(10)])
+        self._build_index(tmp_path, monkeypatch, "refA", [f"Machine learning chunk {i}" for i in range(10)])
         from citeverify_core.retrieval.passage_search import search_passages
-        passages = search_passages("refA", "some query text", k=3)
+        passages = search_passages("refA", "machine learning", k=3)
         assert len(passages) <= 3
         for p in passages:
             assert isinstance(p, Passage)
@@ -429,10 +433,24 @@ class TestSearchPassages:
         assert result == []
 
     def test_passage_scores_clamped(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        self._build_index(tmp_path, monkeypatch, "refB", ["Alpha", "Beta", "Gamma"])
+        self._build_index(tmp_path, monkeypatch, "refB", ["Alpha beta gamma", "Delta epsilon zeta", "Eta theta iota"])
         from citeverify_core.retrieval.passage_search import search_passages
-        for p in search_passages("refB", "query", k=5):
+        for p in search_passages("refB", "alpha query", k=5):
             assert 0.0 <= p.score <= 1.0
+
+    def test_numeric_query_ranked(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """A chunk containing '30%' should outscore one that doesn't, for a '30%' query."""
+        texts = [
+            "The model achieved 30% improvement over the baseline in accuracy.",
+            "This paper discusses transformer architectures and self-attention mechanisms.",
+            "Dataset collection and annotation methodology are described in this section.",
+        ]
+        self._build_index(tmp_path, monkeypatch, "refNum", texts)
+        from citeverify_core.retrieval.passage_search import search_passages
+        passages = search_passages("refNum", "30% improvement accuracy", k=5)
+        assert len(passages) >= 1
+        # The passage with "30" and "improvement" and "accuracy" should rank first
+        assert "30" in passages[0].text or "improvement" in passages[0].text.lower()
 
 
 # ===========================================================================
@@ -441,27 +459,28 @@ class TestSearchPassages:
 
 class TestRetraction:
     def test_retracted_via_update_to(self):
+        from citeverify_core.retrieval.retraction import _is_retracted
         work = {"update-to": [{"type": "retraction", "DOI": "10.xxx/retract"}]}
         assert _is_retracted(work) is True
 
     def test_retracted_via_relation(self):
+        from citeverify_core.retrieval.retraction import _is_retracted
         work = {"relation": {"is-retracted-by": [{"id": "10.xxx/notice"}]}}
         assert _is_retracted(work) is True
 
     def test_no_retraction(self):
+        from citeverify_core.retrieval.retraction import _is_retracted
         work = {"update-to": [{"type": "correction"}], "relation": {}}
         assert _is_retracted(work) is False
 
     def test_empty_work(self):
+        from citeverify_core.retrieval.retraction import _is_retracted
         assert _is_retracted({}) is False
 
     def test_check_retraction_no_doi(self):
         from citeverify_core.retrieval.retraction import check_retraction
-        source = Source(
-            reference_id="r1", matched=True, match_score=0.9,
-            title="Paper", text_level="full_text", full_text_available=True,
-            source_database="crossref",
-        )
+        source = Source(reference_id="r1", matched=True, match_score=0.9, title="Paper",
+                        text_level="full_text", full_text_available=True, source_database="crossref")
         result = check_retraction(source)
         assert "possibly_retracted" not in result.flags
 
@@ -469,12 +488,9 @@ class TestRetraction:
         from citeverify_core.retrieval import retraction as ret_mod
         retracted_work = {"update-to": [{"type": "retraction", "DOI": "10.xxx/notice"}]}
         monkeypatch.setattr(ret_mod, "crossref_by_doi", lambda doi: retracted_work)
-        source = Source(
-            reference_id="r2", matched=True, match_score=0.9,
-            title="Paper", doi="10.xxx/paper",
-            text_level="full_text", full_text_available=True,
-            source_database="crossref",
-        )
+        source = Source(reference_id="r2", matched=True, match_score=0.9, title="Paper",
+                        doi="10.xxx/paper", text_level="full_text", full_text_available=True,
+                        source_database="crossref")
         result = ret_mod.check_retraction(source)
         assert "possibly_retracted" in result.flags
 
@@ -484,35 +500,15 @@ class TestRetraction:
 # ===========================================================================
 
 class TestIngestPdf:
-    def _make_fake_pdf(self, tmp_path: Path, num_pages: int = 2) -> Path:
-        """Create a minimal but real PDF using reportlab (optional) or just write bytes."""
-        # We mock extract_pages so we don't need an actual PDF file
-        return tmp_path / "fake.pdf"
-
     def test_ingest_pdf_full_text(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
-
-        from citeverify_core.retrieval import indexer, ingest as ingest_mod
-
-        # Stub extract_pages to return fake page texts
+        from citeverify_core.retrieval import ingest as ingest_mod
         fake_pages = [PageText(0, "Deep learning is a type of machine learning. " * 30, False)]
         monkeypatch.setattr(ingest_mod, "extract_pages", lambda path, ref_id: fake_pages)
-
-        rng = np.random.default_rng(seed=1)
-
-        def fake_encode(texts_: list[str], **kwargs) -> np.ndarray:
-            emb = rng.random((len(texts_), 16)).astype(np.float32)
-            norms = np.linalg.norm(emb, axis=1, keepdims=True)
-            return emb / norms
-
-        monkeypatch.setattr(indexer, "_model", MagicMock(encode=fake_encode))
-
         pdf_path = tmp_path / "paper.pdf"
-        pdf_path.touch()  # just needs to exist
-
+        pdf_path.touch()
         source = ingest_mod.ingest_pdf("ref_manual", str(pdf_path))
-
         assert source.reference_id == "ref_manual"
         assert source.matched is True
         assert source.text_level == "full_text"
@@ -523,26 +519,12 @@ class TestIngestPdf:
     def test_ingest_pdf_ocr_flag(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
-
-        from citeverify_core.retrieval import indexer, ingest as ingest_mod
-
+        from citeverify_core.retrieval import ingest as ingest_mod
         fake_pages = [PageText(0, "Some OCR text. " * 30, is_ocr=True)]
         monkeypatch.setattr(ingest_mod, "extract_pages", lambda path, ref_id: fake_pages)
-
-        rng = np.random.default_rng(seed=2)
-
-        def fake_encode(texts_: list[str], **kwargs) -> np.ndarray:
-            emb = rng.random((len(texts_), 16)).astype(np.float32)
-            norms = np.linalg.norm(emb, axis=1, keepdims=True)
-            return emb / norms
-
-        monkeypatch.setattr(indexer, "_model", MagicMock(encode=fake_encode))
-
         pdf_path = tmp_path / "ocr.pdf"
         pdf_path.touch()
-
         source = ingest_mod.ingest_pdf("ref_ocr", str(pdf_path))
-
         assert "manual_source" in source.flags
         assert "ocr_text" in source.flags
 
@@ -554,10 +536,8 @@ class TestIngestPdf:
     def test_ingest_pdf_no_text_gives_none_level(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         from citeverify_core.retrieval import ingest as ingest_mod
         monkeypatch.setattr(ingest_mod, "extract_pages", lambda path, ref_id: [])
-
         pdf_path = tmp_path / "empty.pdf"
         pdf_path.touch()
-
         source = ingest_mod.ingest_pdf("ref_empty", str(pdf_path))
         assert source.text_level == "none"
         assert source.full_text_available is False
@@ -575,18 +555,13 @@ class TestSchemas:
 
     def test_source_text_level_validation(self):
         with pytest.raises(Exception):
-            Source(
-                reference_id="x", matched=True, match_score=0.5,
-                title="T", text_level="invalid_level",  # type: ignore
-                full_text_available=False, source_database="crossref",
-            )
+            Source(reference_id="x", matched=True, match_score=0.5,
+                   title="T", text_level="invalid_level",  # type: ignore
+                   full_text_available=False, source_database="crossref")
 
     def test_passage_score_clamped_to_zero_one(self):
         with pytest.raises(Exception):
-            Passage(
-                passage_id="p1", reference_id="r1",
-                text="text", score=1.5,  # out of range
-            )
+            Passage(passage_id="p1", reference_id="r1", text="text", score=1.5)
 
     def test_evidence_empty_bboxes(self):
         e = Evidence(quote="some text", passage_id="p1")
@@ -597,3 +572,195 @@ class TestSchemas:
         b = BBox(x0=10.0, y0=20.0, x1=100.0, y1=50.0)
         assert b.x0 == 10.0
         assert b.y1 == 50.0
+
+
+# ===========================================================================
+# 9. get_pdf_path
+# ===========================================================================
+
+class TestGetPdfPath:
+    def test_returns_none_when_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import citeverify_core.retrieval as ret_pkg
+        monkeypatch.setattr(ret_pkg, "SOURCES_DIR", tmp_path / "sources")
+        from citeverify_core.retrieval import get_pdf_path
+        assert get_pdf_path("nonexistent") is None
+
+    def test_returns_path_for_valid_pdf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        import citeverify_core.retrieval as ret_pkg
+        monkeypatch.setattr(ret_pkg, "SOURCES_DIR", sources_dir)
+        pdf = sources_dir / "ref_pdf.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n%%EOF")
+        from citeverify_core.retrieval import get_pdf_path
+        result = get_pdf_path("ref_pdf")
+        assert result is not None
+        assert result.endswith("ref_pdf.pdf")
+
+    def test_returns_none_for_non_pdf(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        import citeverify_core.retrieval as ret_pkg
+        monkeypatch.setattr(ret_pkg, "SOURCES_DIR", sources_dir)
+        pdf = sources_dir / "ref_html.pdf"
+        pdf.write_bytes(b"<html><body>login page</body></html>")
+        from citeverify_core.retrieval import get_pdf_path
+        assert get_pdf_path("ref_html") is None
+
+
+# ===========================================================================
+# 10. PDF download: magic-byte validation
+# ===========================================================================
+
+class TestPdfMagicBytes:
+    def test_valid_pdf_magic(self, tmp_path: Path):
+        p = tmp_path / "good.pdf"
+        p.write_bytes(b"%PDF-1.4 some content")
+        assert _is_valid_pdf(p) is True
+
+    def test_invalid_magic(self, tmp_path: Path):
+        p = tmp_path / "bad.pdf"
+        p.write_bytes(b"<html>login</html>")
+        assert _is_valid_pdf(p) is False
+
+    def test_missing_file(self, tmp_path: Path):
+        assert _is_valid_pdf(tmp_path / "nonexistent.pdf") is False
+
+    def test_html_response_rejected(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Simulate a paywall returning HTML: download_pdf must return None."""
+        from citeverify_core.retrieval import pdf_handler as ph
+        monkeypatch.setattr(ph, "SOURCES_DIR", tmp_path / "sources")
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.iter_content = MagicMock(return_value=iter([b"<html>"]))
+
+        mock_session = MagicMock()
+        mock_session.get.return_value = mock_resp
+        mock_session.timeout = 20
+
+        monkeypatch.setattr(ph, "get_session", lambda: mock_session)
+
+        result = ph.download_pdf("https://paywall.example.com/paper.pdf", "ref_paywalled")
+        assert result is None
+
+
+# ===========================================================================
+# 11. Flag tests: author_mismatch, doi_not_resolved
+# ===========================================================================
+
+class TestFlags:
+    def test_author_mismatch_flag(self):
+        """_initial_flags should raise author_mismatch when first-author surnames differ."""
+        from citeverify_core.retrieval.retrieve import _initial_flags
+        ref = Reference(reference_id="x", raw_text="x", title="T",
+                        authors=["LeCun, Yann"], year=2017, parse_confidence=0.9)
+        meta = {"doi": "10.xxx/x", "year": 2017, "authors": ["Ashish Vaswani"], "title": "T"}
+        flags = _initial_flags(ref, meta)
+        assert "author_mismatch" in flags
+
+    def test_no_author_mismatch_when_surnames_match(self):
+        from citeverify_core.retrieval.retrieve import _initial_flags
+        ref = Reference(reference_id="x", raw_text="x", title="T",
+                        authors=["Vaswani, Ashish"], year=2017, parse_confidence=0.9)
+        meta = {"doi": "10.xxx/x", "year": 2017, "authors": ["Ashish Vaswani"], "title": "T"}
+        flags = _initial_flags(ref, meta)
+        assert "author_mismatch" not in flags
+
+    def test_year_mismatch_flag(self):
+        from citeverify_core.retrieval.retrieve import _initial_flags
+        ref = Reference(reference_id="x", raw_text="x", title="T",
+                        authors=[], year=2010, parse_confidence=0.9)
+        meta = {"doi": "10.xxx/x", "year": 2017, "authors": [], "title": "T"}
+        flags = _initial_flags(ref, meta)
+        assert "year_mismatch" in flags
+
+    def test_doi_not_resolved_when_no_doi(self):
+        from citeverify_core.retrieval.retrieve import _initial_flags
+        ref = Reference(reference_id="x", raw_text="x", title="T",
+                        authors=[], year=2017, parse_confidence=0.9)
+        meta = {"doi": None, "year": 2017, "authors": [], "title": "T"}
+        flags = _initial_flags(ref, meta)
+        assert "doi_not_resolved" in flags
+
+    def test_not_found_source_includes_doi_not_resolved(self, monkeypatch: pytest.MonkeyPatch):
+        """When DOI lookup fails and no title found, doi_not_resolved must appear."""
+        from citeverify_core.retrieval import retrieve as ret_mod
+        # Stub all fetchers to return None
+        monkeypatch.setattr(ret_mod, "crossref_by_doi", lambda doi: None)
+        monkeypatch.setattr(ret_mod, "crossref_search_title", lambda t: None)
+        monkeypatch.setattr(ret_mod, "openalex_search_title", lambda t: None)
+        monkeypatch.setattr(ret_mod, "arxiv_search_title", lambda t: None)
+        monkeypatch.setattr(ret_mod, "s2_search_title", lambda q: None)
+        monkeypatch.setattr(ret_mod, "index_exists", lambda ref_id: False)
+
+        ref = Reference(reference_id="ref_doi_fail", raw_text="x", title="Some Title",
+                        doi="10.invalid/xyz", parse_confidence=0.5)
+        source = ret_mod.retrieve_source(ref)
+        assert source.matched is False
+        assert "doi_not_resolved" in source.flags
+        assert "reference_not_found" in source.flags
+
+
+# ===========================================================================
+# 12. data/mock/sources.json validation
+# ===========================================================================
+
+class TestMockSources:
+    _MOCK_PATH = _REPO_ROOT / "data" / "mock" / "sources.json"
+
+    def test_mock_sources_file_exists(self):
+        assert self._MOCK_PATH.exists(), f"Missing: {self._MOCK_PATH}"
+
+    def test_mock_sources_valid_json(self):
+        data = json.loads(self._MOCK_PATH.read_text(encoding="utf-8"))
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+    def test_mock_sources_all_valid_source_models(self):
+        """Every object in sources.json must parse as a valid Source."""
+        data = json.loads(self._MOCK_PATH.read_text(encoding="utf-8"))
+        errors = []
+        for i, obj in enumerate(data):
+            try:
+                Source.model_validate(obj)
+            except Exception as exc:
+                errors.append(f"Item {i} ({obj.get('reference_id', '?')}): {exc}")
+        assert not errors, "sources.json validation errors:\n" + "\n".join(errors)
+
+    def test_mock_sources_cover_key_scenarios(self):
+        """sources.json must include at least: matched, unmatched, abstract_only."""
+        data = json.loads(self._MOCK_PATH.read_text(encoding="utf-8"))
+        sources = [Source.model_validate(obj) for obj in data]
+        assert any(s.matched for s in sources), "Need at least one matched source"
+        assert any(not s.matched for s in sources), "Need at least one unmatched source"
+        text_levels = {s.text_level for s in sources}
+        assert "abstract_only" in text_levels or "full_text" in text_levels
+
+
+# ===========================================================================
+# 13. Import smoke test
+# ===========================================================================
+
+class TestImports:
+    def test_public_api_importable(self):
+        from citeverify_core.retrieval import (
+            get_pdf_path,
+            ingest_pdf,
+            locate_quote,
+            retrieve_source,
+            search_passages,
+        )
+        assert callable(retrieve_source)
+        assert callable(search_passages)
+        assert callable(locate_quote)
+        assert callable(ingest_pdf)
+        assert callable(get_pdf_path)
+
+    def test_schemas_importable(self):
+        from citeverify_core.common import schemas
+        assert hasattr(schemas, "Source")
+        assert hasattr(schemas, "Passage")
+        assert hasattr(schemas, "Evidence")
+        assert hasattr(schemas, "Reference")

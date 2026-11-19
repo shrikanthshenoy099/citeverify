@@ -6,12 +6,15 @@ Exported functions (synchronous):
     search_passages(reference_id, query, k) -> list[Passage]
     locate_quote(reference_id, quote)       -> Evidence | None
     ingest_pdf(reference_id, pdf_path)      -> Source   # reviewer-supplied PDF
+    get_pdf_path(reference_id)              -> str | None
 """
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from ..common.schemas import Evidence, Passage, Reference, Source
+from .config import SOURCES_DIR
 from .ingest import ingest_pdf as _ingest_pdf
 from .passage_search import locate_quote as _locate_quote
 from .passage_search import search_passages as _search_passages
@@ -24,6 +27,7 @@ __all__ = [
     "search_passages",
     "locate_quote",
     "ingest_pdf",
+    "get_pdf_path",
 ]
 
 
@@ -62,9 +66,27 @@ def locate_quote(reference_id: str, quote: str) -> Evidence | None:
 
 
 def ingest_pdf(reference_id: str, pdf_path: str) -> Source:
-    """Build a Source + embedding index from a reviewer-supplied PDF.
+    """Build a Source + BM25 index from a reviewer-supplied PDF.
 
     Sets ``manual_source`` flag; OCR pages additionally get ``ocr_text`` flag.
     Overwrites any previous index for *reference_id*.
     """
     return _ingest_pdf(reference_id, pdf_path)
+
+
+def get_pdf_path(reference_id: str) -> str | None:
+    """Return the local path to the cached PDF for *reference_id*, or None.
+
+    This is the path stored at ``data/sources/{reference_id}.pdf``.
+    Returns None if the file does not exist or is not a valid PDF.
+    """
+    path = SOURCES_DIR / f"{reference_id}.pdf"
+    if path.exists():
+        # Validate magic bytes
+        try:
+            with path.open("rb") as fh:
+                if fh.read(4) == b"%PDF":
+                    return str(path)
+        except Exception:
+            pass
+    return None

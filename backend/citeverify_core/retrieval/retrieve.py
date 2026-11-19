@@ -83,12 +83,19 @@ def _initial_flags(reference: Reference, meta: dict[str, Any]) -> list[str]:
     flags: list[str] = []
     if not meta.get("doi"):
         flags.append("doi_not_resolved")
-    # Title mismatch check (fuzzy already passed, but we keep mild warning for borderline cases)
-    # Author / year mismatch
+    # Year mismatch
     ref_year = reference.year
     cand_year = meta.get("year")
     if ref_year and cand_year and abs(ref_year - cand_year) > 1:
         flags.append("year_mismatch")
+    # Author mismatch: first-author surname differs (only when both sides have authors)
+    ref_authors = reference.authors
+    cand_authors = meta.get("authors") or []
+    if ref_authors and cand_authors:
+        from .matcher import _first_surname
+        if _first_surname(ref_authors) and _first_surname(cand_authors):
+            if _first_surname(ref_authors) != _first_surname(cand_authors):
+                flags.append("author_mismatch")
     return flags
 
 
@@ -110,6 +117,7 @@ def retrieve_source(reference: Reference) -> Source:
         return _load_cached_source(ref_id, reference)
 
     meta: dict[str, Any] | None = None
+    doi_lookup_failed = False
 
     # 1. Crossref – DOI direct
     if reference.doi:
@@ -117,6 +125,8 @@ def retrieve_source(reference: Reference) -> Source:
         if work:
             meta = crossref_normalize(work)
             meta["_crossref_raw"] = work  # keep for retraction check
+        else:
+            doi_lookup_failed = True  # DOI given but could not be resolved
 
     # 2. Crossref – title search
     if meta is None and reference.title:
@@ -150,7 +160,10 @@ def retrieve_source(reference: Reference) -> Source:
 
     if meta is None:
         logger.info("Reference not found in any database: %s", ref_id)
-        return _not_found_source(ref_id)
+        flags = ["reference_not_found"]
+        if doi_lookup_failed:
+            flags.append("doi_not_resolved")
+        return _not_found_source(ref_id, flags=flags)
 
     # --- Match check ---
     matched, match_score = is_matched(

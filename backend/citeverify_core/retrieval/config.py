@@ -60,6 +60,14 @@ CONTACT_EMAIL: str = os.getenv("CONTACT_EMAIL", "citeverify@example.com")
 S2_API_KEY: str | None = os.getenv("S2_API_KEY")  # optional
 
 # ---------------------------------------------------------------------------
+# Concurrency / download limits
+# ---------------------------------------------------------------------------
+# Maximum number of worker threads for parallel retrieval (not yet wired; reserved for M4).
+MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+# Maximum PDF size in bytes to download (default 50 MB)
+PDF_MAX_BYTES: int = int(os.getenv("PDF_MAX_BYTES", str(50 * 1024 * 1024)))
+
+# ---------------------------------------------------------------------------
 # OCR
 # ---------------------------------------------------------------------------
 OCR_DPI: int = int(os.getenv("OCR_DPI", "200"))
