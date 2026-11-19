@@ -4,7 +4,10 @@ conftest.py – pytest configuration for CiteVerify backend tests.
 Adds the backend/ directory to sys.path so that
   ``from citeverify_core...`` and ``from app...`` both work.
 """
+import os
 
+os.environ["LLM_PROVIDER"] = "mock"
+os.environ["USE_MOCKS"] = "true"
 import sys
 from pathlib import Path
 
