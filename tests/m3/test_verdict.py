@@ -123,13 +123,15 @@ class TestParseLlmResponse:
             "supporting_quote": "accuracy was 95%",
             "time_sensitive": False,
             "numbers_match": True,
+            "scope_mismatch": False,
         }
-        v, exp, cert, quote, ts, nm = parse_llm_response(data)
+        v, exp, cert, quote, ts, nm, sm = parse_llm_response(data)
         assert v == "supported"
         assert cert == 0.9
         assert quote == "accuracy was 95%"
         assert ts is False
         assert nm is True
+        assert sm is False
 
     def test_missing_supporting_quote_defaults_to_none(self):
         data = {
@@ -138,6 +140,7 @@ class TestParseLlmResponse:
             "llm_certainty": 0.3,
             "time_sensitive": False,
             "numbers_match": False,
+            "scope_mismatch": False,
         }
-        _, _, _, quote, _, _ = parse_llm_response(data)
+        _, _, _, quote, _, _, _ = parse_llm_response(data)
         assert quote is None

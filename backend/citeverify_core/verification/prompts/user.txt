@@ -1,0 +1,38 @@
+## Claim to verify
+{claim_text}
+
+## Claim type
+{claim_type}
+
+## Numbers mentioned in the claim
+{numbers}
+
+## Source metadata
+- Title  : {source_title}
+- Authors: {source_authors}
+- Year   : {source_year}
+- DOI    : {source_doi}
+
+## Source evidence (passage retrieved from the paper)
+{source_passages}
+
+## Task
+1. Determine whether the source evidence supports the claim above.
+2. Identify whether the claim involves time-sensitive information (e.g. rates, rankings, current state-of-the-art).
+3. Check whether specific numbers/statistics in the claim are present in the source.
+   NOTE: treat equivalent forms as matching: "30%" == "30 percent", "0.30", "30 out of 100".
+   For ranges: a claim of "30%" is supported if the source says "28-32%" or "approximately 30%".
+   A missing key figure counts as NOT matching even if other numbers are present.
+
+4. Check whether the scope of the source matches the claim scope (e.g. is a small-pilot finding being
+   presented as a general result? is a lab result being applied to clinical outcomes?). If the source
+   covers a narrower or different population/context, set scope_mismatch=true.
+
+Respond with a JSON object with these fields:
+- verdict        (string enum: supported | partly_supported | unsupported | contradictory | possibly_outdated | needs_review)
+- explanation    (string, 1-3 sentences, evidence-based)
+- llm_certainty  (float 0-1, your confidence in the verdict)
+- supporting_quote (string | null, verbatim quote from the source, or null if none found)
+- time_sensitive (bool)
+- numbers_match  (bool)
+- scope_mismatch (bool)

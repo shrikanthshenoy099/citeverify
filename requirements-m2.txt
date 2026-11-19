@@ -1,0 +1,11 @@
+# requirements-m2.txt – M2 Source Retrieval
+# (Placeholder — M2 team will fill this in on branch m2-retrieval)
+# Python 3.11
+
+pydantic==2.7.4
+requests==2.32.3
+rapidfuzz==3.9.3
+sentence-transformers==3.0.1
+pysbd==0.3.4
+numpy==1.26.4
+pytest==8.3.2

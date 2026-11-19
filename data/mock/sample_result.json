@@ -1,0 +1,119 @@
+{
+  "_comment": "Mock verification result for integration demos and UI development.",
+  "doc_id": "mock-doc-001",
+  "status": "done",
+  "source_type": "text",
+  "num_pages": null,
+  "warnings": [],
+  "claims": [
+    {
+      "claim_id": "mock-claim-001",
+      "text": "Smith et al. (2020) reported that the model achieved 95% accuracy on the benchmark dataset.",
+      "page": null,
+      "section": "Introduction",
+      "claim_type": "numeric",
+      "numbers_mentioned": ["95%"],
+      "flags": [],
+      "verdicts": [
+        {
+          "reference_id": "mock-ref-001",
+          "verdict": "supported",
+          "explanation": "The cited paper explicitly states 95% accuracy on the same benchmark.",
+          "confidence": 0.87,
+          "needs_human_review": false,
+          "flags": [],
+          "evidence": {
+            "quote": "our model achieves 95% accuracy on Dataset X",
+            "passage_id": "p-001",
+            "page": 5,
+            "section": "Results"
+          },
+          "confidence_breakdown": {
+            "retrieval": 0.88,
+            "llm_certainty": 0.9,
+            "text_match": 1.0,
+            "full_text": 1.0,
+            "numeric_match": 1.0
+          },
+          "source_trace": {
+            "doi": "10.1038/mock.2020.001",
+            "url": "https://doi.org/10.1038/mock.2020.001",
+            "page": 5,
+            "section": "Results"
+          }
+        }
+      ]
+    },
+    {
+      "claim_id": "mock-claim-002",
+      "text": "This approach outperforms all prior methods by a large margin (Jones, 2015).",
+      "page": null,
+      "section": "Introduction",
+      "claim_type": "conclusion",
+      "numbers_mentioned": [],
+      "flags": ["possibly_outdated"],
+      "verdicts": [
+        {
+          "reference_id": "mock-ref-002",
+          "verdict": "possibly_outdated",
+          "explanation": "The cited 2015 paper predates more recent baselines; the claim of 'all prior methods' may no longer hold.",
+          "confidence": 0.42,
+          "needs_human_review": true,
+          "flags": ["possibly_outdated", "abstract_only"],
+          "evidence": null,
+          "confidence_breakdown": {
+            "retrieval": 0.60,
+            "llm_certainty": 0.55,
+            "text_match": 0.0,
+            "full_text": 0.4,
+            "numeric_match": 1.0
+          },
+          "source_trace": {
+            "doi": "10.1038/mock.2015.002",
+            "url": null,
+            "page": null,
+            "section": null
+          }
+        }
+      ]
+    },
+    {
+      "claim_id": "mock-claim-003",
+      "text": "The dataset contains 50,000 annotated samples (Brown et al., 2018).",
+      "page": null,
+      "section": "Methods",
+      "claim_type": "numeric",
+      "numbers_mentioned": ["50,000"],
+      "flags": [],
+      "verdicts": [
+        {
+          "reference_id": "mock-ref-003",
+          "verdict": "unsupported",
+          "explanation": "The cited paper describes a dataset of 12,000 samples, not 50,000.",
+          "confidence": 0.78,
+          "needs_human_review": false,
+          "flags": ["number_not_found"],
+          "evidence": {
+            "quote": "we collected 12,000 samples",
+            "passage_id": "p-002",
+            "page": 3,
+            "section": "Dataset"
+          },
+          "confidence_breakdown": {
+            "retrieval": 0.82,
+            "llm_certainty": 0.85,
+            "text_match": 0.9,
+            "full_text": 1.0,
+            "numeric_match": 0.0
+          },
+          "source_trace": {
+            "doi": "10.1038/mock.2018.003",
+            "url": null,
+            "page": 3,
+            "section": "Dataset"
+          }
+        }
+      ]
+    }
+  ]
+}

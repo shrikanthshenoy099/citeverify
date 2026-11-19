@@ -1,0 +1,10 @@
+# requirements-m1.txt – M1 Document Intelligence
+# (Placeholder — M1 team will fill this in on branch m1-doc-intel)
+# Python 3.11
+
+pydantic==2.7.4
+pymupdf==1.24.5
+python-docx==1.1.2
+rapidocr-onnxruntime==1.3.22
+pysbd==0.3.4
+pytest==8.3.2

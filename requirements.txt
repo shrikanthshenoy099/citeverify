@@ -1,0 +1,7 @@
+# Root requirements.txt — includes all module requirement files.
+# Install everything with: pip install -r requirements.txt
+
+-r requirements-m1.txt
+-r requirements-m2.txt
+-r requirements-m3.txt
+-r requirements-m4.txt
