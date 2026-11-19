@@ -35,6 +35,8 @@ REF_OCR_CONFIDENCE_PENALTY: float = 0.20
 CLAIM_MIN_CHARS: int = 30
 # How many sentences of context to include before/after a claim.
 CONTEXT_SENTENCES: int = 1
+# How many candidate sentences to send to the LLM in one batch.
+CLAIM_BATCH_SIZE: int = 20
 
 # ---------------------------------------------------------------------------
 # LLM extraction
