@@ -1,0 +1,600 @@
+[
+  {
+    "id": "eval-001",
+    "description": "Exact numeric match in full text",
+    "claim": {
+      "claim_id": "eval-c-001", "doc_id": "eval-doc", "text": "Accuracy was 95%.",
+      "char_start": 0, "char_end": 18, "claim_type": "numeric",
+      "numbers_mentioned": ["95%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-001"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-001", "raw_text": "Smith 2020", "title": "Test Paper",
+      "authors": ["Smith, J."], "year": 2020, "doi": "10.1/t1", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-001", "matched": true, "match_score": 0.9,
+      "title": "Test Paper", "authors": ["Smith, J."], "year": 2020, "doi": "10.1/t1",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["The model achieved accuracy of 95% on the test set."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Exact match.", "llm_certainty": 0.95,
+      "supporting_quote": "accuracy of 95%", "time_sensitive": false,
+      "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "supported",
+    "expected_flags_include": [],
+    "expected_flags_exclude": ["quote_not_verified", "number_not_found"]
+  },
+  {
+    "id": "eval-002",
+    "description": "Unmatched source -> needs_review without LLM",
+    "claim": {
+      "claim_id": "eval-c-002", "doc_id": "eval-doc", "text": "Effect was significant.",
+      "char_start": 0, "char_end": 23, "claim_type": "factual",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-002"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-002", "raw_text": "Jones 2019", "title": "Effect Study",
+      "authors": ["Jones, B."], "year": 2019, "doi": null, "parse_confidence": 0.8
+    },
+    "source": {
+      "reference_id": "eval-ref-002", "matched": false, "match_score": 0.0,
+      "title": "", "authors": [], "year": null, "doi": null,
+      "url": null, "pdf_path": null, "text_level": "none", "full_text_available": false,
+      "source_database": "", "flags": ["reference_not_found"]
+    },
+    "passages": [],
+    "llm_response": null,
+    "locate_quote_returns": "none",
+    "expected_verdict": "needs_review",
+    "expected_flags_include": ["reference_not_found"],
+    "expected_flags_exclude": ["llm_output_invalid"]
+  },
+  {
+    "id": "eval-003",
+    "description": "Contradictory evidence",
+    "claim": {
+      "claim_id": "eval-c-003", "doc_id": "eval-doc", "text": "Accuracy was 95%.",
+      "char_start": 0, "char_end": 18, "claim_type": "numeric",
+      "numbers_mentioned": ["95%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-003"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-003", "raw_text": "Wang 2021", "title": "Accuracy Study",
+      "authors": ["Wang, C."], "year": 2021, "doi": "10.1/t3", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-003", "matched": true, "match_score": 0.88,
+      "title": "Accuracy Study", "authors": ["Wang, C."], "year": 2021, "doi": "10.1/t3",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["The model achieved only 72% accuracy, not 95%."],
+    "llm_response": {
+      "verdict": "contradictory", "explanation": "Source says 72%.", "llm_certainty": 0.88,
+      "supporting_quote": "only 72% accuracy", "time_sensitive": false,
+      "numbers_match": false, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "contradictory",
+    "expected_flags_include": ["number_not_found"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-004",
+    "description": "Scope mismatch caps supported to partly_supported",
+    "claim": {
+      "claim_id": "eval-c-004", "doc_id": "eval-doc", "text": "Method works globally.",
+      "char_start": 0, "char_end": 22, "claim_type": "conclusion",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-004"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-004", "raw_text": "Lee 2022", "title": "Method Paper",
+      "authors": ["Lee, D."], "year": 2022, "doi": "10.1/t4", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-004", "matched": true, "match_score": 0.85,
+      "title": "Method Paper", "authors": ["Lee, D."], "year": 2022, "doi": "10.1/t4",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["The method works well in the EU context."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Supported in EU context.",
+      "llm_certainty": 0.80, "supporting_quote": "method works well in the EU",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": true
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "partly_supported",
+    "expected_flags_include": ["scope_mismatch"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-005",
+    "description": "Quote not verified -> downgrade supported to needs_review",
+    "claim": {
+      "claim_id": "eval-c-005", "doc_id": "eval-doc", "text": "The drug reduced pain by 60%.",
+      "char_start": 0, "char_end": 28, "claim_type": "numeric",
+      "numbers_mentioned": ["60%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-005"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-005", "raw_text": "Chen 2020", "title": "Drug Trial",
+      "authors": ["Chen, E."], "year": 2020, "doi": "10.1/t5", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-005", "matched": true, "match_score": 0.78,
+      "title": "Drug Trial", "authors": ["Chen, E."], "year": 2020, "doi": "10.1/t5",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["Pain scores were measured at baseline and 12 weeks."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "60% reduction reported.",
+      "llm_certainty": 0.85, "supporting_quote": "completely fabricated nonexistent quote xyz",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "none",
+    "expected_verdict": "needs_review",
+    "expected_flags_include": ["quote_not_verified"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-006",
+    "description": "Number not found caps supported to partly_supported",
+    "claim": {
+      "claim_id": "eval-c-006", "doc_id": "eval-doc", "text": "Response rate was 80%.",
+      "char_start": 0, "char_end": 21, "claim_type": "numeric",
+      "numbers_mentioned": ["80%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-006"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-006", "raw_text": "Park 2021", "title": "Response Study",
+      "authors": ["Park, F."], "year": 2021, "doi": "10.1/t6", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-006", "matched": true, "match_score": 0.82,
+      "title": "Response Study", "authors": ["Park, F."], "year": 2021, "doi": "10.1/t6",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["The response rate was generally high in treated patients."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Response rate mentioned.",
+      "llm_certainty": 0.75, "supporting_quote": "response rate was generally high",
+      "time_sensitive": false, "numbers_match": false, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "partly_supported",
+    "expected_flags_include": ["number_not_found"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-007",
+    "description": "Abstract-only source: confidence capped at 0.50",
+    "claim": {
+      "claim_id": "eval-c-007", "doc_id": "eval-doc", "text": "Survival improved significantly.",
+      "char_start": 0, "char_end": 31, "claim_type": "conclusion",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-007"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-007", "raw_text": "Kim 2019", "title": "Survival Study",
+      "authors": ["Kim, G."], "year": 2019, "doi": "10.1/t7", "parse_confidence": 0.85
+    },
+    "source": {
+      "reference_id": "eval-ref-007", "matched": true, "match_score": 0.78,
+      "title": "Survival Study", "authors": ["Kim, G."], "year": 2019, "doi": "10.1/t7",
+      "url": null, "pdf_path": null, "text_level": "abstract_only", "full_text_available": false,
+      "source_database": "test", "flags": ["abstract_only"]
+    },
+    "passages": ["Survival improved significantly in the treatment group."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Mentioned in abstract.",
+      "llm_certainty": 0.99, "supporting_quote": "Survival improved significantly",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "none",
+    "expected_verdict": "supported",
+    "expected_flags_include": ["abstract_only"],
+    "expected_flags_exclude": [],
+    "confidence_max": 0.50
+  },
+  {
+    "id": "eval-008",
+    "description": "Possibly outdated: old time-sensitive source",
+    "claim": {
+      "claim_id": "eval-c-008", "doc_id": "eval-doc", "text": "Current best accuracy is 85%.",
+      "char_start": 0, "char_end": 28, "claim_type": "numeric",
+      "numbers_mentioned": ["85%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-008"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-008", "raw_text": "Old 2010", "title": "Old Paper",
+      "authors": ["Old, H."], "year": 2010, "doi": "10.1/t8", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-008", "matched": true, "match_score": 0.80,
+      "title": "Old Paper", "authors": ["Old, H."], "year": 2010, "doi": "10.1/t8",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["Accuracy of 85% was state of the art in 2010."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Accurate as of 2010.",
+      "llm_certainty": 0.80, "supporting_quote": "Accuracy of 85%",
+      "time_sensitive": true, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "possibly_outdated",
+    "expected_flags_include": [],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-009",
+    "description": "OCR text flag forces needs_human_review",
+    "claim": {
+      "claim_id": "eval-c-009", "doc_id": "eval-doc", "text": "Temperature was 37°C.",
+      "char_start": 0, "char_end": 21, "claim_type": "numeric",
+      "numbers_mentioned": ["37"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-009"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-009", "raw_text": "Scan 2018", "title": "Scanned Paper",
+      "authors": ["Scan, I."], "year": 2018, "doi": "10.1/t9", "parse_confidence": 0.75
+    },
+    "source": {
+      "reference_id": "eval-ref-009", "matched": true, "match_score": 0.75,
+      "title": "Scanned Paper", "authors": ["Scan, I."], "year": 2018, "doi": "10.1/t9",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": ["ocr_text"]
+    },
+    "passages": ["Temperature was 37 degrees Celsius in all subjects."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Temperature matches.",
+      "llm_certainty": 0.85, "supporting_quote": "Temperature was 37 degrees",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "supported",
+    "expected_flags_include": ["ocr_text"],
+    "expected_flags_exclude": [],
+    "needs_human_review": true
+  },
+  {
+    "id": "eval-010",
+    "description": "Possibly retracted forces needs_human_review",
+    "claim": {
+      "claim_id": "eval-c-010", "doc_id": "eval-doc", "text": "Vaccine efficacy was 94%.",
+      "char_start": 0, "char_end": 24, "claim_type": "numeric",
+      "numbers_mentioned": ["94%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-010"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-010", "raw_text": "Retracted 2021", "title": "Vaccine Paper",
+      "authors": ["Ret, J."], "year": 2021, "doi": "10.1/t10", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-010", "matched": true, "match_score": 0.88,
+      "title": "Vaccine Paper", "authors": ["Ret, J."], "year": 2021, "doi": "10.1/t10",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": ["possibly_retracted"]
+    },
+    "passages": ["Vaccine efficacy was reported as 94% in the trial."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Efficacy reported.",
+      "llm_certainty": 0.90, "supporting_quote": "efficacy was reported as 94%",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "supported",
+    "expected_flags_include": ["possibly_retracted"],
+    "expected_flags_exclude": [],
+    "needs_human_review": true
+  },
+  {
+    "id": "eval-011",
+    "description": "Low retrieval score flags correctly",
+    "claim": {
+      "claim_id": "eval-c-011", "doc_id": "eval-doc", "text": "Patients improved over 6 months.",
+      "char_start": 0, "char_end": 32, "claim_type": "factual",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-011"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-011", "raw_text": "Miller 2020", "title": "Recovery Study",
+      "authors": ["Miller, K."], "year": 2020, "doi": "10.1/t11", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-011", "matched": true, "match_score": 0.72,
+      "title": "Recovery Study", "authors": ["Miller, K."], "year": 2020, "doi": "10.1/t11",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages_with_score": 0.20,
+    "passages": ["Patient outcomes were measured at multiple time points."],
+    "llm_response": {
+      "verdict": "partly_supported", "explanation": "Some improvement noted.",
+      "llm_certainty": 0.60, "supporting_quote": null,
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "none",
+    "expected_verdict": "partly_supported",
+    "expected_flags_include": ["low_retrieval_score"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-012",
+    "description": "Possibly unrelated citation (score < 0.175)",
+    "claim": {
+      "claim_id": "eval-c-012", "doc_id": "eval-doc", "text": "Carbon emissions declined.",
+      "char_start": 0, "char_end": 25, "claim_type": "factual",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-012"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-012", "raw_text": "Green 2019", "title": "Climate Data",
+      "authors": ["Green, L."], "year": 2019, "doi": "10.1/t12", "parse_confidence": 0.85
+    },
+    "source": {
+      "reference_id": "eval-ref-012", "matched": true, "match_score": 0.60,
+      "title": "Climate Data", "authors": ["Green, L."], "year": 2019, "doi": "10.1/t12",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages_with_score": 0.10,
+    "passages": ["Data on global temperatures was collected annually."],
+    "llm_response": {
+      "verdict": "partly_supported", "explanation": "Related but not direct.",
+      "llm_certainty": 0.50, "supporting_quote": null,
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "none",
+    "expected_verdict": "partly_supported",
+    "expected_flags_include": ["low_retrieval_score", "possibly_unrelated_citation"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-013",
+    "description": "Manual source treated as full_text",
+    "claim": {
+      "claim_id": "eval-c-013", "doc_id": "eval-doc", "text": "The compound inhibits growth.",
+      "char_start": 0, "char_end": 28, "claim_type": "factual",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-013"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-013", "raw_text": "Lab 2022", "title": "Lab Report",
+      "authors": ["Lab, M."], "year": 2022, "doi": null, "parse_confidence": 0.85
+    },
+    "source": {
+      "reference_id": "eval-ref-013", "matched": true, "match_score": 0.90,
+      "title": "Lab Report", "authors": ["Lab, M."], "year": 2022, "doi": null,
+      "url": null, "pdf_path": "/data/sources/lab2022.pdf", "text_level": "full_text",
+      "full_text_available": true, "source_database": "manual", "flags": ["manual_source"]
+    },
+    "passages": ["The compound inhibits cell growth in vitro."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Direct match in uploaded PDF.",
+      "llm_certainty": 0.92, "supporting_quote": "compound inhibits cell growth",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "supported",
+    "expected_flags_include": ["manual_source"],
+    "expected_flags_exclude": ["reference_not_found", "full_text_unavailable"]
+  },
+  {
+    "id": "eval-014",
+    "description": "LLM always fails -> llm_output_invalid flagged",
+    "claim": {
+      "claim_id": "eval-c-014", "doc_id": "eval-doc", "text": "Incidence rate doubled.",
+      "char_start": 0, "char_end": 23, "claim_type": "numeric",
+      "numbers_mentioned": ["2x"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-014"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-014", "raw_text": "Data 2021", "title": "Incidence Paper",
+      "authors": ["Data, N."], "year": 2021, "doi": "10.1/t14", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-014", "matched": true, "match_score": 0.85,
+      "title": "Incidence Paper", "authors": ["Data, N."], "year": 2021, "doi": "10.1/t14",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["Incidence rates were tracked over ten years."],
+    "llm_response": "always_fail_schema",
+    "locate_quote_returns": "none",
+    "expected_verdict": "needs_review",
+    "expected_flags_include": ["llm_output_invalid"],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-015",
+    "description": "Factual claim with no numbers, no issues",
+    "claim": {
+      "claim_id": "eval-c-015", "doc_id": "eval-doc", "text": "The authors used a randomised design.",
+      "char_start": 0, "char_end": 36, "claim_type": "methodological",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-015"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-015", "raw_text": "Trial 2022", "title": "Clinical Trial",
+      "authors": ["Trial, O."], "year": 2022, "doi": "10.1/t15", "parse_confidence": 0.95
+    },
+    "source": {
+      "reference_id": "eval-ref-015", "matched": true, "match_score": 0.93,
+      "title": "Clinical Trial", "authors": ["Trial, O."], "year": 2022, "doi": "10.1/t15",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["We used a double-blind randomised controlled design."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Design confirmed.",
+      "llm_certainty": 0.95, "supporting_quote": "double-blind randomised controlled design",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "supported",
+    "expected_flags_include": [],
+    "expected_flags_exclude": ["quote_not_verified", "number_not_found", "scope_mismatch"]
+  },
+  {
+    "id": "eval-016",
+    "description": "Partly supported: LLM returns partly_supported directly",
+    "claim": {
+      "claim_id": "eval-c-016", "doc_id": "eval-doc", "text": "Patients in all age groups improved.",
+      "char_start": 0, "char_end": 35, "claim_type": "conclusion",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-016"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-016", "raw_text": "Age 2021", "title": "Age Stratified Study",
+      "authors": ["Age, P."], "year": 2021, "doi": "10.1/t16", "parse_confidence": 0.88
+    },
+    "source": {
+      "reference_id": "eval-ref-016", "matched": true, "match_score": 0.84,
+      "title": "Age Stratified Study", "authors": ["Age, P."], "year": 2021, "doi": "10.1/t16",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["Improvement was seen in adults but not in children."],
+    "llm_response": {
+      "verdict": "partly_supported", "explanation": "Only adults improved.",
+      "llm_certainty": 0.78, "supporting_quote": "Improvement was seen in adults",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "partly_supported",
+    "expected_flags_include": [],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-017",
+    "description": "Unsupported: LLM returns unsupported",
+    "claim": {
+      "claim_id": "eval-c-017", "doc_id": "eval-doc", "text": "No side effects were observed.",
+      "char_start": 0, "char_end": 29, "claim_type": "factual",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-017"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-017", "raw_text": "Side 2020", "title": "Safety Profile",
+      "authors": ["Side, Q."], "year": 2020, "doi": "10.1/t17", "parse_confidence": 0.9
+    },
+    "source": {
+      "reference_id": "eval-ref-017", "matched": true, "match_score": 0.86,
+      "title": "Safety Profile", "authors": ["Side, Q."], "year": 2020, "doi": "10.1/t17",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["Several mild adverse events were reported."],
+    "llm_response": {
+      "verdict": "unsupported", "explanation": "Side effects documented.",
+      "llm_certainty": 0.88, "supporting_quote": null,
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "none",
+    "expected_verdict": "unsupported",
+    "expected_flags_include": [],
+    "expected_flags_exclude": []
+  },
+  {
+    "id": "eval-018",
+    "description": "Needs review: LLM returns needs_review directly",
+    "claim": {
+      "claim_id": "eval-c-018", "doc_id": "eval-doc", "text": "The biomarker is diagnostic.",
+      "char_start": 0, "char_end": 27, "claim_type": "factual",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-018"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-018", "raw_text": "Bio 2021", "title": "Biomarker Paper",
+      "authors": ["Bio, R."], "year": 2021, "doi": "10.1/t18", "parse_confidence": 0.80
+    },
+    "source": {
+      "reference_id": "eval-ref-018", "matched": true, "match_score": 0.70,
+      "title": "Biomarker Paper", "authors": ["Bio, R."], "year": 2021, "doi": "10.1/t18",
+      "url": null, "pdf_path": null, "text_level": "abstract_only", "full_text_available": false,
+      "source_database": "test", "flags": ["abstract_only"]
+    },
+    "passages": ["The biomarker showed potential for diagnosis."],
+    "llm_response": {
+      "verdict": "needs_review", "explanation": "Requires full text review.",
+      "llm_certainty": 0.45, "supporting_quote": null,
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "none",
+    "expected_verdict": "needs_review",
+    "expected_flags_include": ["abstract_only"],
+    "expected_flags_exclude": [],
+    "needs_human_review": true
+  },
+  {
+    "id": "eval-019",
+    "description": "Full-text with high confidence, clean pass",
+    "claim": {
+      "claim_id": "eval-c-019", "doc_id": "eval-doc", "text": "Mortality was reduced by 25%.",
+      "char_start": 0, "char_end": 28, "claim_type": "numeric",
+      "numbers_mentioned": ["25%"], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-019"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-019", "raw_text": "Mortal 2022", "title": "Mortality Reduction",
+      "authors": ["Mortal, S."], "year": 2022, "doi": "10.1/t19", "parse_confidence": 0.95
+    },
+    "source": {
+      "reference_id": "eval-ref-019", "matched": true, "match_score": 0.95,
+      "title": "Mortality Reduction", "authors": ["Mortal, S."], "year": 2022, "doi": "10.1/t19",
+      "url": "https://doi.org/10.1/t19", "pdf_path": null, "text_level": "full_text",
+      "full_text_available": true, "source_database": "semantic_scholar", "flags": []
+    },
+    "passages": ["Mortality was reduced by 25% compared to the control group."],
+    "llm_response": {
+      "verdict": "supported", "explanation": "Exact numeric match.",
+      "llm_certainty": 0.97, "supporting_quote": "Mortality was reduced by 25%",
+      "time_sensitive": false, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "supported",
+    "expected_flags_include": [],
+    "expected_flags_exclude": ["quote_not_verified", "number_not_found", "low_retrieval_score"]
+  },
+  {
+    "id": "eval-020",
+    "description": "Contradictory: not overridden by possibly_outdated",
+    "claim": {
+      "claim_id": "eval-c-020", "doc_id": "eval-doc", "text": "Intervention A was superior.",
+      "char_start": 0, "char_end": 27, "claim_type": "conclusion",
+      "numbers_mentioned": [], "context_before": "", "context_after": "", "flags": [],
+      "reference_ids": ["eval-ref-020"]
+    },
+    "reference": {
+      "reference_id": "eval-ref-020", "raw_text": "Old Contra 2010", "title": "Old Comparison",
+      "authors": ["Old, T."], "year": 2010, "doi": "10.1/t20", "parse_confidence": 0.88
+    },
+    "source": {
+      "reference_id": "eval-ref-020", "matched": true, "match_score": 0.83,
+      "title": "Old Comparison", "authors": ["Old, T."], "year": 2010, "doi": "10.1/t20",
+      "url": null, "pdf_path": null, "text_level": "full_text", "full_text_available": true,
+      "source_database": "test", "flags": []
+    },
+    "passages": ["Intervention B was found to be superior in all measures."],
+    "llm_response": {
+      "verdict": "contradictory", "explanation": "B was superior, not A.",
+      "llm_certainty": 0.90, "supporting_quote": "Intervention B was found to be superior",
+      "time_sensitive": true, "numbers_match": true, "scope_mismatch": false
+    },
+    "locate_quote_returns": "found",
+    "expected_verdict": "contradictory",
+    "expected_flags_include": [],
+    "expected_flags_exclude": []
+  }
+]

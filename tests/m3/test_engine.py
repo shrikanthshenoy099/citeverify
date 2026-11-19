@@ -118,6 +118,7 @@ def _mock_llm_supported() -> MockLLMClient:
             "supporting_quote": "accuracy was 95%",
             "time_sensitive": False,
             "numbers_match": True,
+            "scope_mismatch": False,
         },
     )
     return client
@@ -264,6 +265,7 @@ class TestVerifyEdgeCases:
                 "supporting_quote": None,
                 "time_sensitive": True,  # triggers outdated check
                 "numbers_match": True,
+                "scope_mismatch": False,
             },
         )
         v = verify(
@@ -288,6 +290,7 @@ class TestVerifyEdgeCases:
                 "supporting_quote": None,
                 "time_sensitive": False,
                 "numbers_match": False,  # claim has numbers but they don't match
+                "scope_mismatch": False,
             },
         )
         v = verify(

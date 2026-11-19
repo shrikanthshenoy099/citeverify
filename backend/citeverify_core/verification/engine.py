@@ -5,23 +5,30 @@ Public interface (called by M4 orchestrator):
 
     verify(claim, reference, source) -> Verdict
 
-The engine:
-  1. Calls M2's search_passages to retrieve relevant passages.
-  2. Optionally calls M2's locate_quote to find the best evidence passage + bboxes.
-  3. Sends a prompt to the LLM via llm_client.complete_json().
-  4. Applies the possibly_outdated override.
-  5. Computes the weighted confidence score.
-  6. Collects flags and decides whether human review is required.
-  7. Returns a fully populated Verdict.
+Pipeline
+--------
+1. Early exit if source not matched (no LLM call).
+2. Retrieve passages from M2.search_passages.
+3. Apply low_retrieval_score / possibly_unrelated_citation flags.
+4. Call LLM with up to 2 retries on schema-invalid JSON.
+5. Apply scope_mismatch cap (supported -> partly_supported at most).
+6. Apply possibly_outdated override.
+7. Anti-hallucination: verify supporting quote with M2.locate_quote;
+   if not found and quote is not an exact substring of retrieved text,
+   flag quote_not_verified and downgrade supported/partly_supported -> needs_review.
+8. Numeric check: flag number_not_found when numbers are mentioned but LLM says no match;
+   if verdict was 'supported' downgrade to 'partly_supported'.
+9. Compute weighted confidence.
+10. Apply needs_human_review gate.
+11. Build source trace and return Verdict.
 
-Re-running verify() for the same (claim, reference) pair is safe and idempotent —
-M4 may call it again after a manual source upload (see M3 Addendum §4).
+Re-running verify() for the same (claim, reference) pair is safe and idempotent.
+M4 calls it again after a manual source upload (see reverify_for_reference).
 """
 
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Optional
 
 from citeverify_core.common.llm_client import LLMError, LLMSchemaError, get_llm_client
@@ -34,6 +41,7 @@ from citeverify_core.common.schemas import (
     SourceTrace,
     Verdict,
 )
+from citeverify_core.verification import config
 from citeverify_core.verification.confidence import (
     compute_confidence,
     requires_human_review,
@@ -48,14 +56,10 @@ from citeverify_core.verification.verdict import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# M2 interface stubs (injected at runtime or imported directly)
+# M2 lazy import with graceful fallback
 # ---------------------------------------------------------------------------
-# The engine imports M2 lazily to avoid circular imports and to remain testable
-# with mock passage providers.  At runtime M4 may also inject passage providers
-# via the optional keyword arguments on verify().
 
 _M2_AVAILABLE = False
-
 try:
     from citeverify_core.retrieval import search_passages as _search_passages  # type: ignore
     from citeverify_core.retrieval import locate_quote as _locate_quote        # type: ignore
@@ -63,7 +67,7 @@ try:
 except ImportError:
     logger.warning(
         "citeverify_core.retrieval not importable; verify() will run with empty passages. "
-        "This is expected during M3 development before M2 is integrated."
+        "Expected during M3 development before M2 is merged."
     )
 
 
@@ -80,7 +84,61 @@ def _default_locate_quote(reference_id: str, quote: str) -> Optional[Evidence]:
 
 
 # ---------------------------------------------------------------------------
-# Public verify() function
+# Constants / helpers
+# ---------------------------------------------------------------------------
+
+_VERDICTS_SUPPORTING = {"supported", "partly_supported"}
+_LLM_MAX_RETRIES = 2  # max extra attempts on schema-invalid JSON
+
+
+def _quote_in_passages(quote: str, passages: list[Passage]) -> bool:
+    """Return True if *quote* is an exact substring of any retrieved passage."""
+    q = quote.lower()
+    return any(q in p.text.lower() for p in passages)
+
+
+def _make_unmatched_verdict(claim: Claim, reference: Reference, flags: list[str]) -> Verdict:
+    """Return a fast needs_review Verdict without calling the LLM (source not matched)."""
+    source_stub = Source(
+        reference_id=reference.reference_id,
+        matched=False,
+        match_score=0.0,
+        title="",
+        text_level="none",
+        full_text_available=False,
+        source_database="",
+        flags=flags,
+    )
+    overall, breakdown = compute_confidence(
+        retrieval_score=0.0,
+        llm_certainty=0.0,
+        text_match_score=0.0,
+        source=source_stub,
+        numbers_match=True,
+        flags=flags,
+        verdict="needs_review",
+    )
+    return Verdict(
+        claim_id=claim.claim_id,
+        reference_id=reference.reference_id,
+        verdict="needs_review",
+        explanation="Source could not be retrieved; human review required.",
+        evidence=None,
+        confidence=overall,
+        confidence_breakdown=breakdown,
+        source_trace=SourceTrace(
+            doi=reference.doi,
+            url=None,
+            page=None,
+            section=None,
+        ),
+        flags=flags,
+        needs_human_review=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public verify()
 # ---------------------------------------------------------------------------
 
 
@@ -101,46 +159,61 @@ def verify(
     claim:              The claim to verify.
     reference:          The Reference the claim cites.
     source:             The retrieved Source for that reference (from M2).
-    search_passages_fn: Optional override for M2's search_passages (for testing).
-    locate_quote_fn:    Optional override for M2's locate_quote (for testing).
-    llm_client:         Optional LLMClient override (for testing).
+    search_passages_fn: Optional override for M2.search_passages (testing).
+    locate_quote_fn:    Optional override for M2.locate_quote (testing).
+    llm_client:         Optional LLMClient override (testing).
 
     Returns
     -------
-    A fully populated Verdict.  Never raises — on failure returns a
-    'needs_review' verdict with appropriate flags.
+    A fully populated Verdict.  Never raises.
     """
     _search = search_passages_fn or _default_search_passages
     _locate = locate_quote_fn or _default_locate_quote
     _llm = llm_client or get_llm_client()
 
-    flags: list[str] = list(source.flags)  # start with M2 flags on the source
+    flags: list[str] = list(source.flags)
+
+    # -- Step 1: Early exit if source not matched ----------------------------
+    if not source.matched:
+        if "reference_not_found" not in flags:
+            flags.append("reference_not_found")
+        logger.debug(
+            "Source not matched for ref=%s; returning needs_review without LLM call.",
+            reference.reference_id,
+        )
+        return _make_unmatched_verdict(claim, reference, flags)
+
     evidence: Optional[Evidence] = None
 
-    # ── 1. Retrieve relevant passages ───────────────────────────────────────
+    # -- Step 2: Retrieve passages -------------------------------------------
     passages: list[Passage] = []
     top_retrieval_score = 0.0
 
-    if source.matched and source.text_level in ("full_text", "abstract_only"):
+    if source.text_level in ("full_text", "abstract_only"):
         try:
             passages = _search(reference.reference_id, claim.text, k=5)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "search_passages failed for reference %s: %s", reference.reference_id, exc
-            )
+            logger.warning("search_passages failed for ref=%s: %s", reference.reference_id, exc)
 
     if passages:
         top_retrieval_score = max(p.score for p in passages)
     else:
-        logger.debug(
-            "No passages retrieved for reference %s; claim %s will be low-confidence.",
-            reference.reference_id, claim.claim_id,
-        )
-        if source.matched and source.full_text_available:
-            if "full_text_unavailable" not in flags:
-                flags.append("full_text_unavailable")
+        if source.full_text_available and "full_text_unavailable" not in flags:
+            flags.append("full_text_unavailable")
 
-    # ── 2. Call LLM ─────────────────────────────────────────────────────────
+    # -- Step 3: Retrieval quality flags ------------------------------------
+    # NOTE: M2 uses BM25 scores.  The low_retrieval_score threshold (0.35) was
+    # calibrated for cosine similarity [0,1].  Until M2 confirms its score range,
+    # this comparison is best-effort.  Adjust CV_LOW_RETRIEVAL_THRESHOLD once M2
+    # normalises BM25 output.  See integration risk note in README.
+    if passages and top_retrieval_score < config.LOW_RETRIEVAL_SCORE_THRESHOLD:
+        if "low_retrieval_score" not in flags:
+            flags.append("low_retrieval_score")
+        if top_retrieval_score < config.LOW_RETRIEVAL_SCORE_THRESHOLD * 0.5:
+            if "possibly_unrelated_citation" not in flags:
+                flags.append("possibly_unrelated_citation")
+
+    # -- Step 4: Call LLM (up to _LLM_MAX_RETRIES extra attempts) -----------
     system_prompt, user_prompt = build_prompts(
         claim=claim,
         reference=reference,
@@ -154,55 +227,65 @@ def verify(
     llm_certainty = 0.0
     supporting_quote: Optional[str] = None
     time_sensitive = False
-    numbers_match = True  # default to True when no numbers mentioned
+    numbers_match = True
+    scope_mismatch = False
 
-    try:
-        llm_data = _llm.complete_json(
-            system=system_prompt,
-            user=user_prompt,
-            schema=LLM_RESPONSE_SCHEMA,
-            temperature=0,
-        )
-        (
-            verdict_label,
-            explanation,
-            llm_certainty,
-            supporting_quote,
-            time_sensitive,
-            numbers_match,
-        ) = parse_llm_response(llm_data)
-        llm_valid = True
-
-    except LLMSchemaError as exc:
-        logger.error(
-            "LLM returned invalid schema for claim %s / ref %s: %s",
-            claim.claim_id, reference.reference_id, exc,
-        )
-        flags.append("llm_output_invalid")
-
-    except LLMError as exc:
-        logger.error(
-            "LLM error for claim %s / ref %s: %s",
-            claim.claim_id, reference.reference_id, exc,
-        )
-
-    # ── 3. Special-flag handling ─────────────────────────────────────────────
-    # ocr_text: force human review and note in explanation
-    if "ocr_text" in flags:
-        if explanation and llm_valid:
-            explanation += " (Note: source text was obtained via OCR and may be less reliable.)"
-
-    # possibly_retracted: mention in explanation, force human review
-    if "possibly_retracted" in flags:
-        if explanation and llm_valid:
-            explanation += (
-                " WARNING: This source may have been retracted. "
-                "Human review is mandatory."
+    llm_attempts = 0
+    max_attempts = 1 + _LLM_MAX_RETRIES
+    while llm_attempts < max_attempts:
+        llm_attempts += 1
+        try:
+            llm_data = _llm.complete_json(
+                system=system_prompt,
+                user=user_prompt,
+                schema=LLM_RESPONSE_SCHEMA,
+                temperature=0,
             )
+            (
+                verdict_label,
+                explanation,
+                llm_certainty,
+                supporting_quote,
+                time_sensitive,
+                numbers_match,
+                scope_mismatch,
+            ) = parse_llm_response(llm_data)
+            llm_valid = True
+            break
 
-    # manual_source: treat as normal full-text (no special override needed per addendum)
+        except LLMSchemaError as exc:
+            logger.warning(
+                "LLM schema error (attempt %d/%d) for claim=%s ref=%s: %s",
+                llm_attempts, max_attempts, claim.claim_id, reference.reference_id, exc,
+            )
+            if llm_attempts >= max_attempts:
+                flags.append("llm_output_invalid")
 
-    # ── 4. Apply possibly_outdated override ──────────────────────────────────
+        except LLMError as exc:
+            logger.error(
+                "LLM error for claim=%s ref=%s: %s",
+                claim.claim_id, reference.reference_id, exc,
+            )
+            break  # non-retryable
+
+    # -- Step 5: Scope mismatch cap -----------------------------------------
+    if scope_mismatch:
+        if "scope_mismatch" not in flags:
+            flags.append("scope_mismatch")
+        if verdict_label == "supported":
+            verdict_label = "partly_supported"
+            explanation += " (Note: scope mismatch detected -- verdict capped at partly_supported.)"
+
+    # -- Step 6: Special flag handling --------------------------------------
+    if "ocr_text" in flags and llm_valid:
+        explanation += " (Note: source text obtained via OCR and may be less reliable.)"
+
+    if "possibly_retracted" in flags and llm_valid:
+        explanation += (
+            " WARNING: This source may have been retracted. Human review is mandatory."
+        )
+
+    # -- Step 7: Apply possibly_outdated override ---------------------------
     if llm_valid:
         verdict_label = maybe_override_possibly_outdated(
             verdict=verdict_label,  # type: ignore[arg-type]
@@ -210,37 +293,56 @@ def verify(
             time_sensitive=time_sensitive,
         )
 
-    # ── 5. Locate evidence quote ─────────────────────────────────────────────
+    # -- Step 8: Anti-hallucination quote verification ---------------------
     text_match_score = 0.0
-    if supporting_quote and source.text_level in ("full_text",):
+    if supporting_quote and source.text_level == "full_text":
         try:
             evidence = _locate(reference.reference_id, supporting_quote)
             if evidence is not None:
                 text_match_score = 1.0
             else:
-                flags.append("quote_not_verified")
-                text_match_score = 0.3  # LLM found it but fuzzy match failed
+                if _quote_in_passages(supporting_quote, passages):
+                    text_match_score = 0.6
+                    flags.append("quote_not_verified")
+                else:
+                    # Quote not found in source or passages: hallucination risk
+                    flags.append("quote_not_verified")
+                    text_match_score = 0.0
+                    if verdict_label in _VERDICTS_SUPPORTING:
+                        logger.warning(
+                            "Quote not found by locate_quote or in passages; "
+                            "downgrading verdict %r -> needs_review for claim=%s ref=%s",
+                            verdict_label, claim.claim_id, reference.reference_id,
+                        )
+                        verdict_label = "needs_review"
+                        explanation += (
+                            " (Caution: the supporting quote could not be verified in the "
+                            "source text. Verdict downgraded to needs_review.)"
+                        )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "locate_quote failed for reference %s: %s", reference.reference_id, exc
-            )
+            logger.warning("locate_quote failed for ref=%s: %s", reference.reference_id, exc)
             flags.append("quote_not_verified")
+
     elif supporting_quote:
-        # abstract_only or metadata_only: cannot verify bbox, but record quote
+        # abstract_only or metadata_only: cannot verify bbox, record as unverified quote
         evidence = Evidence(
             quote=supporting_quote,
             passage_id=passages[0].passage_id if passages else "unknown",
             page=passages[0].page if passages else None,
             section=passages[0].section if passages else None,
         )
-        text_match_score = 0.5  # partial credit
+        text_match_score = 0.5
+        flags.append("quote_not_verified")
 
-    # ── 6. Numeric check ─────────────────────────────────────────────────────
+    # -- Step 9: Numeric check ---------------------------------------------
     if claim.numbers_mentioned and not numbers_match:
         if "number_not_found" not in flags:
             flags.append("number_not_found")
+        if verdict_label == "supported":
+            verdict_label = "partly_supported"
+            explanation += " (Note: key numbers from the claim were not found in the source.)"
 
-    # ── 7. Compute confidence ────────────────────────────────────────────────
+    # -- Step 10: Confidence -----------------------------------------------
     overall_confidence, breakdown = compute_confidence(
         retrieval_score=top_retrieval_score,
         llm_certainty=llm_certainty,
@@ -251,14 +353,14 @@ def verify(
         verdict=verdict_label,
     )
 
-    # ── 8. Human review gate ─────────────────────────────────────────────────
+    # -- Step 11: Human review gate ----------------------------------------
     needs_review_flag = requires_human_review(
         confidence=overall_confidence,
         verdict=verdict_label,
         flags=flags,
     )
 
-    # ── 9. Source trace ──────────────────────────────────────────────────────
+    # -- Step 12: Source trace --------------------------------------------
     source_trace = SourceTrace(
         doi=source.doi or reference.doi,
         url=source.url,
@@ -292,22 +394,11 @@ def reverify_for_reference(
     **verify_kwargs,
 ) -> list[Verdict]:
     """
-    Re-run verify() for every (claim, reference) pair that involves *reference_id*.
+    Re-run verify() for every claim that cites *reference_id*.
 
+    Safe to call multiple times -- verify() is idempotent.
     Called by M4 after a manual source PDF is uploaded via
     POST /api/references/{reference_id}/source.
-
-    Parameters
-    ----------
-    reference_id: The reference whose source has been updated.
-    claims:       All claims that cite this reference (filtered by M4).
-    reference:    The Reference object.
-    source:       The newly ingested Source (from M2.ingest_pdf).
-    **verify_kwargs: Forwarded to verify() (e.g. llm_client override for tests).
-
-    Returns
-    -------
-    List of fresh Verdicts, one per claim.
     """
     results: list[Verdict] = []
     for claim in claims:
