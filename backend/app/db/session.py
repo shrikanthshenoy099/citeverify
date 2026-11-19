@@ -39,3 +39,9 @@ def get_db():
         yield db
     finally:
         db.close()
+def init_db() -> None:
+    from app.db import models  # noqa: F401  (registers all tables)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    Base.metadata.create_all(bind=engine)
+
+init_db()

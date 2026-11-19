@@ -85,3 +85,8 @@ class Settings(BaseSettings):
 
 # Singleton – import this everywhere
 settings = Settings()
+from functools import lru_cache
+
+@lru_cache
+def get_settings():
+       return settings

@@ -25,7 +25,9 @@ os.environ["USE_MOCKS"] = "true"
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+import app.routers.documents as documents_router
 from app.main import app
 from app.db.models import Base
 from app.db.session import get_db
@@ -38,11 +40,12 @@ from app.db.session import get_db
 def client():
     """Create a fresh TestClient with an in-memory DB for each test."""
     engine = create_engine(
-        "sqlite:///:memory:",
+        "sqlite://",
         connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
-    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    TestingSession = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
     def override_get_db():
         db = TestingSession()
@@ -52,9 +55,16 @@ def client():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    # Patch SessionLocal in the router module — that's where _run_pipeline_sync
+    # holds its reference (bound at import time via `from app.db.session import
+    # SessionLocal`), so that's the name that must be replaced.
+    original_session_local = documents_router.SessionLocal
+    documents_router.SessionLocal = TestingSession
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
+    documents_router.SessionLocal = original_session_local
+    engine.dispose()
 
 
 # ---------------------------------------------------------------------------

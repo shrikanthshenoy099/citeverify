@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import ClaimRow, DocumentRow, ReferenceRow, ReviewRow, SourceRow, VerdictRow
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.orchestrator import run_pipeline
 
 logger = logging.getLogger(__name__)
@@ -114,8 +114,6 @@ async def upload_document(
 
 def _run_pipeline_sync(doc_id: str, file_path: Optional[str], raw_text: Optional[str]) -> None:
     """Runs in BackgroundTasks (synchronous thread)."""
-    from app.db.session import SessionLocal
-
     db = SessionLocal()
     try:
         run_pipeline(doc_id=doc_id, db=db, file_path=file_path, raw_text=raw_text)
