@@ -1,0 +1,28 @@
+# M2 – Source Retrieval dependencies
+# Python 3.11+ required (project standard; tested on 3.12).
+# Install: pip install -r requirements-m2.txt
+
+# HTTP
+requests==2.32.3
+urllib3==2.2.3
+
+# Fuzzy matching (title + quote location)
+rapidfuzz==3.9.7
+
+# BM25 passage search (rank-bm25; replaces sentence-transformers/torch)
+rank-bm25==0.2.2
+
+# Sentence splitting (never crosses page boundaries)
+pysbd==0.3.4
+
+# PDF text extraction
+PyMuPDF==1.24.14          # provides 'fitz'
+
+# OCR – primary engine (rapidocr-onnxruntime is pip-only, no system binary)
+rapidocr-onnxruntime==1.4.0
+
+# Pydantic v2 (shared schemas)
+pydantic==2.9.2
+
+# Numpy (used by BM25 and chunker word-count helpers)
+numpy==1.26.4

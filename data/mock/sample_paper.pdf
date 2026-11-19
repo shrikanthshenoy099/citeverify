@@ -1,0 +1,37 @@
+%PDF-1.4
+1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj
+2 0 obj<</Type /Pages /Kids [3 0 R] /Count 1>>endobj
+3 0 obj<</Type /Page /Parent 2 0 R /MediaBox [0 0 595 842]
+  /Contents 4 0 R /Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 310>>
+stream
+BT
+/F1 12 Tf
+72 742 Td
+(CiteVerify sample document for M2 testing.) Tj
+0 -30 Td
+(Transformers achieve state-of-the-art results on many NLP tasks.) Tj
+0 -20 Td
+(The model was trained on 30% of the available corpus, achieving) Tj
+0 -15 Td
+(an accuracy of 92.3% on the test set.) Tj
+0 -35 Td
+(Multi-head attention allows the model to jointly attend to infor-) Tj
+0 -15 Td
+(mation from different representation subspaces at different positions.) Tj
+ET
+endstream
+endobj
+5 0 obj<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000266 00000 n 
+0000000628 00000 n 
+trailer<</Size 6 /Root 1 0 R>>
+startxref
+715
+%%EOF

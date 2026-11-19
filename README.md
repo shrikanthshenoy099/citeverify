@@ -323,6 +323,107 @@ REST API (all under `/api`):
 
 ---
 
+## Module M2 – Source Retrieval
+
+**Owner**: M2 team
+**Branch**: `m2-retrieval`
+**Commit prefix**: `[M2]`
+**Files owned**:
+- `backend/citeverify_core/retrieval/` (all files)
+- `requirements-m2.txt`
+- `tests/m2/`
+
+### Public interface
+
+```python
+from citeverify_core.retrieval import retrieve_source, search_passages, locate_quote, ingest_pdf
+```
+
+| Function | Signature | Description |
+|---|---|---|
+| `retrieve_source` | `(reference: Reference) → Source` | Locate paper, download PDF, build index |
+| `search_passages` | `(reference_id, query, k=5) → list[Passage]` | Top-k cosine similarity passages |
+| `locate_quote` | `(reference_id, quote) → Evidence \| None` | Fuzzy-locate a quote + PDF bboxes |
+| `ingest_pdf` | `(reference_id, pdf_path) → Source` | Index a reviewer-supplied PDF |
+
+### Resolution pipeline
+
+`retrieve_source` tries sources in this order, stopping at the first match:
+
+1. **Crossref** – DOI-direct resolve, then title search
+2. **OpenAlex** – title search (with abstract for non-PDF fallback)
+3. **arXiv** – title search
+4. **Unpaywall** – open-access PDF URL for a known DOI
+5. **Semantic Scholar** – title/DOI search (optional `S2_API_KEY`)
+
+No API keys required. All calls use `CONTACT_EMAIL` as the `mailto` parameter.
+
+### Matching rules
+
+| Condition | Verdict |
+|---|---|
+| `title_ratio ≥ 92` | matched (regardless of author/year) |
+| `title_ratio ≥ 85` AND (first-author surname matches OR year ±1) | matched |
+| Otherwise | not matched → flags: `title_mismatch`, `reference_not_found` |
+
+### Chunking and indexing
+
+- Sentence splitting: **pysbd** – never crosses page boundaries
+- Chunk size: **~250 words**, **50-word overlap**
+- Embedding model: `all-MiniLM-L6-v2` (configurable `EMBEDDING_MODEL`)
+- Index format: `data/cache/index/{reference_id}/embeddings.npy` + `metadata.json`
+- Search: **numpy cosine similarity**, top-k (configurable `TOP_K`, default 5)
+- Low-retrieval flag: top score < 0.35 → `low_retrieval_score`
+
+### OCR fallback
+
+PDF pages with no text layer are passed to `common/ocr.py:ocr_pdf_page()`.
+OCR'd sources receive `ocr_text` flag. `locate_quote` returns empty `bboxes` for OCR pages.
+
+### Reviewer-supplied PDFs (`ingest_pdf`)
+
+Called by M4 endpoint `POST /api/references/{reference_id}/source`.
+Sets `manual_source` flag; OCR pages additionally get `ocr_text`. Overwrites any previous index.
+
+### Retraction check (stretch)
+
+After retrieval, M2 inspects the Crossref `update-to` and `relation` fields.
+If a retraction notice is found, adds flag `possibly_retracted`. Silently skipped if DOI is absent.
+
+### Flags set by M2
+
+| Flag | Meaning |
+|---|---|
+| `reference_not_found` | No database returned a matching record |
+| `doi_not_resolved` | Metadata found but no DOI in the record |
+| `title_mismatch` | Title ratio below threshold |
+| `year_mismatch` | Year differs by more than ±1 |
+| `full_text_unavailable` | No open-access PDF found |
+| `abstract_only` | Only an abstract was available |
+| `ocr_text` | Some or all text came from OCR |
+| `low_retrieval_score` | Top cosine score < 0.35 |
+| `manual_source` | PDF was supplied by the reviewer |
+| `possibly_retracted` | Crossref retraction notice found |
+
+### Running M2 tests
+
+```bash
+# From the repo root (Python 3.11 venv active):
+pip install -r requirements-m2.txt
+pytest tests/m2/ -v
+```
+
+50 tests run fully offline (no network, no GPU).
+
+### Configuration (`retrieval/config.py`)
+
+All thresholds can be overridden via environment variables (see `.env.example`):
+`EMBEDDING_MODEL`, `CHUNK_WORDS`, `CHUNK_OVERLAP_WORDS`, `TOP_K`,
+`LOW_RETRIEVAL_THRESHOLD`, `TITLE_RATIO_MATCHED`, `TITLE_RATIO_SOLO`,
+`YEAR_TOLERANCE`, `QUOTE_FUZZY_THRESHOLD`, `HTTP_TIMEOUT`, `OCR_DPI`.
+
+---
+
 ## Data contracts
 
 All Pydantic v2 models are in `backend/citeverify_core/common/schemas.py`.
