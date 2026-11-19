@@ -152,6 +152,7 @@ _MOCK_RESPONSES: dict[str, dict] = {
         "llm_certainty": 0.5,
         "time_sensitive": False,
         "numbers_match": True,
+        "scope_mismatch": False,
     }
 }
 

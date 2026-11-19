@@ -275,29 +275,70 @@ Responsibilities:
 
 **Public interface:**
 ```python
-from citeverify_core.verification.engine import verify
-from citeverify_core.common.llm_client import complete_json
+from citeverify_core.verification.engine import verify, reverify_for_reference
+from citeverify_core.common.llm_client import get_llm_client
 
 verdict: Verdict = verify(claim, reference, source)
-result: dict = complete_json(system, user, schema, temperature=0)
+verdicts: list[Verdict] = reverify_for_reference(reference_id, claims, reference, source)
 ```
 
-Responsibilities:
-- Call `search_passages` (M2) to retrieve relevant text.
-- Call `complete_json` to assess verdict, explanation, confidence.
-- Call `locate_quote` (M2) for evidence bounding boxes.
-- Compute weighted confidence (see `config.py` weights).
-- Set `needs_human_review` per project rules.
-- Implement `llm_client.py` IBM Bob adapter when mechanism is confirmed.
+`verify()` accepts three optional keyword overrides for testing:
+- `search_passages_fn` — replaces the M2 `search_passages` call
+- `locate_quote_fn`   — replaces the M2 `locate_quote` call
+- `llm_client`        — replaces the default `get_llm_client()` result
 
-**Confidence weights** (all in `config.py`):
-| Component | Weight |
-|---|---|
-| retrieval | 0.20 |
-| llm_certainty | 0.30 |
-| text_match | 0.20 |
-| full_text | 0.10 |
-| numeric_match | 0.20 |
+**Pipeline steps (engine.py):**
+1. Early exit if `source.matched == False` → `needs_review`, no LLM call, `reference_not_found` flag
+2. Retrieve passages from M2 `search_passages`
+3. Retrieval quality flags: score < 0.35 → `low_retrieval_score`; score < 0.175 → also `possibly_unrelated_citation`
+4. Call LLM via `llm_client.complete_json`; up to 2 retries on `LLMSchemaError` → `llm_output_invalid` flag on exhaustion
+5. Scope mismatch: LLM returns `scope_mismatch=true` → flag + cap `supported` → `partly_supported`
+6. Special flags: `ocr_text` appends a caution note; `possibly_retracted` appends a retraction warning
+7. `possibly_outdated` override: source older than 10 years AND `time_sensitive=true` → override verdict
+8. Anti-hallucination: supporting quote verified with `locate_quote`; if not found in source or passages → `quote_not_verified` + downgrade `supported`/`partly_supported` → `needs_review`
+9. Numeric mismatch: `numbers_mentioned` non-empty AND `numbers_match=false` → `number_not_found` + cap `supported` → `partly_supported`
+10. Compute weighted confidence
+11. `requires_human_review` gate (confidence, verdict, flags)
+12. Build `SourceTrace` and return `Verdict`
+
+**Confidence weights** (all in `verification/config.py`, overridable via `CV_` env vars):
+| Component | Weight | Env var |
+|---|---|---|
+| retrieval | 0.20 | `CV_W_RETRIEVAL` |
+| llm_certainty | 0.30 | `CV_W_LLM_CERTAINTY` |
+| text_match | 0.20 | `CV_W_TEXT_MATCH` |
+| full_text | 0.10 | `CV_W_FULL_TEXT` |
+| numeric_match | 0.20 | `CV_W_NUMERIC_MATCH` |
+
+**`needs_human_review = true` when:** confidence < 0.60, OR verdict in {needs_review, contradictory, possibly_outdated}, OR any flag in {quote_not_verified, number_not_found, scope_mismatch, possibly_retracted, ocr_text, abstract_only, full_text_unavailable}.
+
+**abstract_only** sources: overall confidence capped at 0.50.
+
+**LLM adapter (`common/llm_client.py`):**
+
+| `LLM_PROVIDER` | Client | Notes |
+|---|---|---|
+| `mock` | `MockLLMClient` | No network, deterministic. Default. |
+| `http` | `GenericHTTPLLMClient` | OpenAI-compatible endpoint; needs `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` |
+| `bob` | `BobLLMClient` | ⚠️ Stub only — awaiting IBM Bob API details |
+
+**Prompts:** stored in `backend/citeverify_core/verification/prompts/system.txt` and `user.txt`. Edit these files to tune the LLM instructions without changing Python code.
+
+**Evaluation harness:**
+```bash
+# From repo root (venv active, pythonpath not needed — script self-configures):
+python backend/citeverify_core/verification/eval.py
+# Expected: "Results: 20/20 passed  – ALL PASS"  (exit code 0)
+```
+
+The harness loads `data/mock/eval_set.json` (20 labeled cases) and runs `verify()` with injected stubs. All 20 cases must pass; any failure prints a detailed diff and exits with code 1.
+
+**Running M3 tests:**
+```bash
+# From repo root:
+pytest tests/m3/ -v
+# 81 tests, all offline (no network, no GPU).
+```
 
 **Dependencies:** `requirements-m3.txt`
 
