@@ -1,14 +1,14 @@
 # requirements-m4.txt – Product & Integration (M4)
 # Pin versions; tested on Python 3.11
 
-fastapi==0.111.0
+fastapi>=0.111.0
 uvicorn[standard]==0.30.1
 pydantic>=2.7.1,<3
-pydantic-settings==2.3.3
-sqlalchemy==2.0.30
-python-multipart==0.0.9
-reportlab==4.2.0
-httpx==0.27.0
+pydantic-settings>=2.3.3
+sqlalchemy>=2.0.30
+python-multipart>=0.0.9
+reportlab>=4.2.0
+httpx>=0.27.0
 
 # Testing
 jsonschema>=4.22
