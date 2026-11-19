@@ -27,6 +27,7 @@ SIMPLE_SCHEMA = {
         "llm_certainty": {"type": "number"},
         "time_sensitive": {"type": "boolean"},
         "numbers_match": {"type": "boolean"},
+        "scope_mismatch": {"type": "boolean"},
     },
     "required": ["verdict", "explanation", "llm_certainty", "time_sensitive", "numbers_match"],
     "additionalProperties": False,
