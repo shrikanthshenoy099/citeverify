@@ -18,6 +18,7 @@ import uuid
 from typing import Optional
 
 from citeverify_core.common import llm_client
+from citeverify_core.common.llm_client import get_llm_client
 from citeverify_core.common.schemas import Flags, Reference
 from citeverify_core.doc_intel.config import (
     LLM_TEMPERATURE,
@@ -139,7 +140,7 @@ def _llm_enrich(raw_text: str) -> dict:
     Returns a dict with keys matching _REF_EXTRACTION_SCHEMA; empty dict on failure.
     """
     try:
-        result = llm_client.complete_json(
+        result = get_llm_client().complete_json(
             system=_REF_SYSTEM_PROMPT,
             user=f"Reference string:\n{raw_text}",
             schema=_REF_EXTRACTION_SCHEMA,
