@@ -178,3 +178,30 @@ class Review(BaseModel):
     comment: str = ""
     reviewer: str
     timestamp: str  # ISO-8601
+
+
+# ---------------------------------------------------------------------------
+# Standard flag constants (import and use these – do not hard-code strings)
+# [M4] Added for convenience; all modules should import from here.
+# ---------------------------------------------------------------------------
+
+class Flags:
+    """Standard flag string constants.  Use these instead of raw strings."""
+
+    NO_CITATION = "no_citation"
+    REFERENCE_NOT_FOUND = "reference_not_found"
+    DOI_NOT_RESOLVED = "doi_not_resolved"
+    TITLE_MISMATCH = "title_mismatch"
+    AUTHOR_MISMATCH = "author_mismatch"
+    YEAR_MISMATCH = "year_mismatch"
+    ABSTRACT_ONLY = "abstract_only"
+    FULL_TEXT_UNAVAILABLE = "full_text_unavailable"
+    QUOTE_NOT_VERIFIED = "quote_not_verified"
+    NUMBER_NOT_FOUND = "number_not_found"
+    POSSIBLY_UNRELATED_CITATION = "possibly_unrelated_citation"
+    LOW_RETRIEVAL_SCORE = "low_retrieval_score"
+    SCOPE_MISMATCH = "scope_mismatch"
+    LLM_OUTPUT_INVALID = "llm_output_invalid"
+    OCR_TEXT = "ocr_text"
+    POSSIBLY_RETRACTED = "possibly_retracted"
+    MANUAL_SOURCE = "manual_source"

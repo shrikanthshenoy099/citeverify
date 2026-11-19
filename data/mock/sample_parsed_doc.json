@@ -1,0 +1,47 @@
+{
+  "_comment": "Mock parsed document for integration tests. Owned by M1.",
+  "doc_id": "mock_doc_001",
+  "source_type": "text",
+  "num_pages": null,
+  "references": [
+    {
+      "reference_id": "mock_doc_001_ref_0000",
+      "raw_text": "Devlin, J. et al. (2019). BERT: Pre-training of Deep Bidirectional Transformers. arXiv:1810.04805.",
+      "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+      "authors": ["Devlin, Jacob", "Chang, Ming-Wei", "Lee, Kenton", "Toutanova, Kristina"],
+      "year": 2019,
+      "doi": null,
+      "venue": "arXiv",
+      "parse_confidence": 0.80
+    },
+    {
+      "reference_id": "mock_doc_001_ref_0001",
+      "raw_text": "Wang, A. et al. (2018). GLUE: A Multi-Task Benchmark. doi:10.18653/v1/W18-5446.",
+      "title": "GLUE: A Multi-Task Benchmark",
+      "authors": ["Wang, Alex"],
+      "year": 2018,
+      "doi": "10.18653/v1/W18-5446",
+      "venue": null,
+      "parse_confidence": 0.80
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "mock_doc_001_claim_0000",
+      "doc_id": "mock_doc_001",
+      "text": "BERT achieved 93.5% accuracy on the GLUE benchmark, a 4.2% improvement over previous methods [1].",
+      "page": null,
+      "section": null,
+      "char_start": 0,
+      "char_end": 97,
+      "citation_markers": ["[1]"],
+      "reference_ids": ["mock_doc_001_ref_0000"],
+      "claim_type": "numeric",
+      "numbers_mentioned": ["93.5%", "4.2%"],
+      "context_before": "",
+      "context_after": "We therefore conclude that pre-training is essential.",
+      "flags": []
+    }
+  ],
+  "warnings": []
+}

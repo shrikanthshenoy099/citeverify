@@ -1,0 +1,32 @@
+# requirements-m1.txt – M1 Document Intelligence dependencies
+# Pin versions for reproducibility. Python 3.11.
+#
+# Install with:  pip install -r requirements-m1.txt
+
+# PDF parsing
+PyMuPDF==1.24.3
+
+# DOCX parsing
+python-docx==1.1.2
+
+# Sentence segmentation
+pysbd==0.3.4
+
+# Pydantic v2 (shared schemas)
+pydantic==2.7.1
+
+# OCR – primary engine (pip-only, no Tesseract binary needed)
+rapidocr-onnxruntime==1.3.22
+onnxruntime==1.18.0
+
+# OCR – image helpers used by both engines
+Pillow==10.3.0
+numpy==1.26.4
+
+# OCR – fallback (optional; requires Tesseract binary on PATH)
+pytesseract==0.3.13
+
+# Fuzzy string matching (used by M2 locate_quote; M1 uses indirectly via schemas)
+rapidfuzz==3.9.3
+
+# Logging / utility (stdlib only – no extra deps needed)

@@ -2,3 +2,4 @@
 pythonpath = ["backend"]
 testpaths = ["tests"]
 addopts = "-v"
+asyncio_mode = "auto"
