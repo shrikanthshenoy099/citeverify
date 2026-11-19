@@ -17,7 +17,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -179,12 +179,9 @@ def get_results(doc_id: str, db: Session = Depends(get_db)):
 @router.get("/{doc_id}/export")
 def export_results(
     doc_id: str,
-    format: str = "csv",
+    format: str = Query("csv", pattern="^(csv|pdf)$"),
     db: Session = Depends(get_db),
 ):
-    if format not in ("csv", "pdf"):
-        raise HTTPException(400, "format must be 'csv' or 'pdf'")
-
     row = db.get(DocumentRow, doc_id)
     if row is None:
         raise HTTPException(404, f"Document {doc_id!r} not found")

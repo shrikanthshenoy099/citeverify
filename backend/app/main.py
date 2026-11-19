@@ -90,3 +90,8 @@ app.include_router(router_references)
 @app.get("/health", tags=["health"])
 def health():
     return {"status": "ok", "service": "citeverify"}
+
+
+@app.get("/", tags=["health"])
+def root():
+    return {"status": "ok", "service": "CiteVerify"}
