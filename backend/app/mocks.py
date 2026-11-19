@@ -231,8 +231,8 @@ def mock_verify(claim: Claim, reference: Reference, source: Source) -> Verdict:
         )
 
     needs_review = (
-        confidence < 0.60
-        or verdict_label in ("needs_review", "contradictory", "possibly_outdated")
+        confidence < 0.70
+        or verdict_label in ("needs_review", "contradictory", "possibly_outdated", "partly_supported")
     )
 
     return Verdict(
