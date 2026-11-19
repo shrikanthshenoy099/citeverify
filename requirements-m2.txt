@@ -1,0 +1,29 @@
+# M2 – Source Retrieval dependencies
+# Python 3.11+ required (project standard).
+# Install: pip install -r requirements-m2.txt
+
+# HTTP
+requests==2.32.3
+urllib3==2.2.3
+
+# Fuzzy matching (title + quote location)
+rapidfuzz==3.9.7
+
+# Sentence embeddings  (all-MiniLM-L6-v2)
+# torch is a heavy dependency; install a CPU-only wheel unless you have a GPU.
+# See: https://pytorch.org/get-started/locally/
+sentence-transformers==3.3.1
+torch==2.5.1
+numpy==1.26.4
+
+# Sentence splitting (never crosses page boundaries)
+pysbd==0.3.4
+
+# PDF text extraction
+PyMuPDF==1.24.14          # provides 'fitz'
+
+# OCR – primary engine (rapidocr-onnxruntime is pip-only, no system binary)
+rapidocr-onnxruntime==1.4.0
+
+# Pydantic v2 (shared schemas)
+pydantic==2.9.2
