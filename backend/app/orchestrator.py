@@ -47,40 +47,24 @@ def _import_parse_document():
     if settings.use_mocks:
         from app.mocks import mock_parse_document as fn
         return fn
-    try:
-        from citeverify_core.doc_intel.parser import parse_document as fn  # type: ignore[import]
-        return fn
-    except (ImportError, NotImplementedError):
-        from app.mocks import mock_parse_document as fn
-        logger.warning("M1 parse_document unavailable – falling back to mock")
-        return fn
+    from citeverify_core.doc_intel.parser import parse_document as fn
+    return fn
 
 
 def _import_retrieve_source():
     if settings.use_mocks:
         from app.mocks import mock_retrieve_source as fn
         return fn
-    try:
-        from citeverify_core.retrieval.retriever import retrieve_source as fn  # type: ignore[import]
-        return fn
-    except (ImportError, NotImplementedError):
-        from app.mocks import mock_retrieve_source as fn
-        logger.warning("M2 retrieve_source unavailable – falling back to mock")
-        return fn
+    from citeverify_core.retrieval import retrieve_source as fn
+    return fn
 
 
 def _import_verify():
     if settings.use_mocks:
         from app.mocks import mock_verify as fn
         return fn
-    try:
-        from citeverify_core.verification.engine import verify as fn  # type: ignore[import]
-        return fn
-    except (ImportError, NotImplementedError):
-        from app.mocks import mock_verify as fn
-        logger.warning("M3 verify unavailable – falling back to mock")
-        return fn
-
+    from citeverify_core.verification.engine import verify as fn
+    return fn
 
 # ---------------------------------------------------------------------------
 # Main pipeline
