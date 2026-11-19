@@ -190,6 +190,7 @@ class Flags:
 
     NO_CITATION = "no_citation"
     REFERENCE_NOT_FOUND = "reference_not_found"
+    REFERENCE_LIST_NOT_FOUND = "reference_list_not_found"  # M1: no reference section detected
     DOI_NOT_RESOLVED = "doi_not_resolved"
     TITLE_MISMATCH = "title_mismatch"
     AUTHOR_MISMATCH = "author_mismatch"
