@@ -55,3 +55,6 @@ logs/
 htmlcov/
 .coverage
 coverage.xml
+
+backend/data/
+frontend/next-env.d.ts
