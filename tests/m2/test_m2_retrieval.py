@@ -350,19 +350,22 @@ class TestIndexer:
         indexer.build_index(chunks, "ref2")
         results = indexer.cosine_search("ref2", "text chunk topic", k=3)
         assert len(results) <= 3
+        # cosine_search now returns RAW BM25 scores (unbounded non-negative floats)
         for meta, score in results:
-            assert 0.0 <= score < 1.0  # BM25 norm is [0, 1) not [0, 1]
+            assert score >= 0.0
 
     def test_bm25_score_scale_documented(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Verify score normalisation: score 0 for no overlap, >0 for overlap, all in [0,1).
+        """Verify per-query max normalisation in search_passages.
 
-        BM25 IDF is 0 when a term appears in ALL documents. With only 2 docs where
-        every term is unique, we need enough documents so that 'neural' appears in a
-        minority – that gives positive IDF and hence positive BM25 scores.
+        cosine_search returns raw BM25 scores.
+        search_passages normalises per-query: score / max_score_in_query → [0, 1].
+        The best-matching passage always scores 1.0.
         """
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")
         monkeypatch.setattr("citeverify_core.retrieval.config.INDEX_DIR", tmp_path / "index")
+        monkeypatch.setattr("citeverify_core.retrieval.passage_search.INDEX_DIR", tmp_path / "index")
         from citeverify_core.retrieval import indexer
+        from citeverify_core.retrieval.passage_search import search_passages
 
         # Build a larger corpus so IDF > 0 for query terms
         chunks = [
@@ -374,22 +377,27 @@ class TestIndexer:
         ]
         indexer.build_index(chunks, "sc")
 
-        # Query exclusively about neural/ML; sc_0 must rank first
-        results = indexer.cosine_search("sc", "neural network deep learning", k=5)
-        scores = {m["chunk_id"]: s for m, s in results}
-        assert scores["sc_0"] > 0.0, "sc_0 should have a positive score for a matching query"
-        assert scores["sc_0"] > scores.get("sc_1", 0.0), "Neural chunk should outscore fruit chunk"
+        # Raw scores from cosine_search are unbounded; sc_0 must rank first
+        raw_results = indexer.cosine_search("sc", "neural network deep learning", k=5)
+        raw_scores = {m["chunk_id"]: s for m, s in raw_results}
+        assert raw_scores["sc_0"] > 0.0, "sc_0 should have a positive raw score"
+        assert raw_scores["sc_0"] > raw_scores.get("sc_1", 0.0), "Neural chunk must outscore fruit chunk"
 
-        # All scores must be in [0, 1)
-        for _, s in results:
-            assert 0.0 <= s < 1.0
+        # search_passages applies per-query normalisation: best passage = 1.0
+        passages = search_passages("sc", "neural network deep learning", k=5)
+        assert len(passages) >= 1
+        # The top passage must be normalised to 1.0
+        assert passages[0].score == 1.0, f"Top passage should be 1.0, got {passages[0].score}"
+        # All normalised scores must be in [0, 1]
+        for p in passages:
+            assert 0.0 <= p.score <= 1.0
 
-        # Normalisation: raw / (raw + 1) → score for 0 raw = 0.0
+        # _normalise_score unit test: raw / max_raw
         from citeverify_core.retrieval.indexer import _normalise_score
-        assert _normalise_score(0.0) == 0.0
-        assert 0.49 < _normalise_score(1.0) < 0.51   # ~0.5
-        assert 0.90 < _normalise_score(10.0) < 0.92  # ~0.91
-        assert _normalise_score(1000.0) < 1.0
+        assert _normalise_score(0.0, max_raw=5.0) == 0.0
+        assert _normalise_score(5.0, max_raw=5.0) == 1.0
+        assert _normalise_score(2.5, max_raw=5.0) == 0.5
+        assert _normalise_score(0.0, max_raw=0.0) == 0.0  # degenerate
 
     def test_index_not_found_returns_none(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr("citeverify_core.retrieval.indexer.INDEX_DIR", tmp_path / "index")

@@ -4,6 +4,21 @@ M2 – Passage search and quote location.
 Public functions:
   search_passages(reference_id, query, k) -> list[Passage]
   locate_quote(reference_id, quote)       -> Evidence | None
+
+BM25 score normalisation
+------------------------
+``cosine_search`` returns raw BM25 scores.  ``search_passages`` normalises
+them **per query** by dividing by the maximum raw score in that query's
+result set:
+
+    score_norm = raw / max_raw      (clamped to [0, 1])
+
+This means:
+  - The best passage for each query always scores 1.0.
+  - A passage with no token overlap scores 0.0.
+  - ``LOW_RETRIEVAL_THRESHOLD`` (0.35) means the top passage matched fewer
+    than ~35% of the best-matching passage's BM25 weight, i.e. very weak.
+  - M3 must NOT re-normalise scores from ``search_passages``.
 """
 from __future__ import annotations
 
@@ -13,7 +28,7 @@ from pathlib import Path
 
 from ..common.schemas import Evidence, Passage
 from .config import LOW_RETRIEVAL_THRESHOLD, QUOTE_FUZZY_THRESHOLD, INDEX_DIR
-from .indexer import cosine_search
+from .indexer import cosine_search, _normalise_score
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +53,26 @@ def search_passages(reference_id: str, query: str, k: int = 5) -> list[Passage]:
         Maximum number of passages to return.
     """
     hits = cosine_search(reference_id, query, k=k)
+    if not hits:
+        logger.info("No passages found for reference %s (index may not exist)", reference_id)
+        return []
+
+    # Per-query max normalisation: score_norm = raw / max_raw
+    max_raw = max(raw for _, raw in hits) if hits else 0.0
+
     passages: list[Passage] = []
-    for chunk_meta, score in hits:
+    for chunk_meta, raw_score in hits:
+        norm_score = _normalise_score(raw_score, max_raw)
         p = Passage(
             passage_id=chunk_meta["chunk_id"],
             reference_id=reference_id,
             text=chunk_meta["text"],
-            page=chunk_meta.get("page_index"),  # 0-based; UI converts to 1-based
+            page=chunk_meta.get("page_index"),  # 0-based; UI adds 1 for display
             section=chunk_meta.get("section"),
-            score=round(max(0.0, min(1.0, score)), 4),
+            score=round(norm_score, 4),
         )
         passages.append(p)
-    if not passages:
-        logger.info("No passages found for reference %s (index may not exist)", reference_id)
-    elif passages[0].score < LOW_RETRIEVAL_THRESHOLD:
+    if passages[0].score < LOW_RETRIEVAL_THRESHOLD:
         logger.info(
             "Low retrieval score (%.3f < %.3f) for reference %s",
             passages[0].score,
