@@ -1,27 +1,11 @@
-# requirements-m4.txt – M4 Product & Integration dependencies
-# Python 3.11.  Pin versions for reproducibility.
-# Install with: pip install -r requirements-m4.txt
+# requirements-m4.txt – Product & Integration (M4)
+# Pin versions; tested on Python 3.11
 
-# ── FastAPI stack ────────────────────────────────────────────────────────────
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
-python-multipart==0.0.9        # multipart file uploads
-
-# ── Database ─────────────────────────────────────────────────────────────────
+pydantic==2.7.3
+pydantic-settings==2.3.3
 sqlalchemy==2.0.30
-aiosqlite==0.20.0              # async SQLite driver for FastAPI
-
-# ── Pydantic v2 (shared schemas) ─────────────────────────────────────────────
-pydantic==2.7.4
-pydantic-settings==2.3.3       # settings via .env
-
-# ── PDF export ────────────────────────────────────────────────────────────────
-reportlab==4.1.0
-
-# ── Testing ───────────────────────────────────────────────────────────────────
-pytest==8.3.2
-pytest-asyncio==0.23.7
-httpx==0.27.0                  # async test client for FastAPI
-
-# ── Misc utilities ────────────────────────────────────────────────────────────
-python-dotenv==1.0.1
+python-multipart==0.0.9
+reportlab==4.2.0
+httpx==0.27.0

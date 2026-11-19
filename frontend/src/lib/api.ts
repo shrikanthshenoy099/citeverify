@@ -1,134 +1,120 @@
 /**
- * API client for CiteVerify backend.
- * All requests go through Next.js rewrites → http://localhost:8000
+ * lib/api.ts – Typed API client for the CiteVerify backend.
+ *
+ * Uses the Next.js rewrite (/api/* → http://localhost:8000/api/*) so no
+ * CORS headers are needed in development.
  */
 
-const BASE = '/api'
+import type {
+  ClaimWithVerdicts,
+  DocumentResults,
+  DocumentStatus,
+  Review,
+  ReviewAction,
+  VerdictLabel,
+} from "./types";
 
-export type DocumentStatus = 'pending' | 'processing' | 'done' | 'error'
-export type VerdictLabel =
-  | 'supported'
-  | 'partly_supported'
-  | 'unsupported'
-  | 'contradictory'
-  | 'possibly_outdated'
-  | 'needs_review'
+const BASE = "/api";
 
-export interface VerdictItem {
-  reference_id: string
-  verdict: VerdictLabel
-  confidence: number
-  needs_human_review: boolean
-  explanation: string
-  flags: string[]
-  evidence: null | {
-    quote: string
-    passage_id: string
-    page: number | null
-    section: string | null
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+async function handleResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`API ${res.status}: ${body}`);
   }
-  confidence_breakdown: {
-    retrieval: number
-    llm_certainty: number
-    text_match: number
-    full_text: number
-    numeric_match: number
-  }
-  source_trace: {
-    doi: string | null
-    url: string | null
-    page: number | null
-    section: string | null
-  }
+  return res.json() as Promise<T>;
 }
 
-export interface ClaimItem {
-  claim_id: string
-  text: string
-  page: number | null
-  section: string | null
-  claim_type: string
-  citation_markers: string[]
-  reference_ids: string[]
-  numbers_mentioned: string[]
-  flags: string[]
-  verdicts: VerdictItem[]
+// ── Documents ─────────────────────────────────────────────────────────────────
+
+/** Upload a PDF/DOCX file. Returns { doc_id, status }. */
+export async function uploadDocument(file: File): Promise<{ doc_id: string; status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/documents`, { method: "POST", body: form });
+  return handleResponse(res);
 }
 
-export interface ReferenceItem {
-  reference_id: string
-  title: string | null
-  authors: string[]
-  year: number | null
-  doi: string | null
-  venue: string | null
-  parse_confidence: number
+/** Submit pasted text. Returns { doc_id, status }. */
+export async function submitText(text: string): Promise<{ doc_id: string; status: string }> {
+  const form = new FormData();
+  form.append("text", text);
+  const res = await fetch(`${BASE}/documents`, { method: "POST", body: form });
+  return handleResponse(res);
 }
 
-export interface DocumentResults {
-  doc_id: string
-  status: DocumentStatus
-  source_type: string
-  num_pages: number | null
-  warnings: string[]
-  references: ReferenceItem[]
-  claims: ClaimItem[]
+/** Poll document status. */
+export async function getDocumentStatus(docId: string): Promise<DocumentStatus> {
+  const res = await fetch(`${BASE}/documents/${docId}/status`);
+  return handleResponse(res);
 }
 
-export interface DocumentStatusResponse {
-  doc_id: string
-  status: DocumentStatus
-  source_type: string
-  num_pages: number | null
-  warnings: string[]
-  num_claims: number
-  num_references: number
-}
-
-/** Upload a file or paste text. Returns {doc_id, status}. */
-export async function uploadDocument(
-  fileOrText: File | string
-): Promise<{ doc_id: string; status: string }> {
-  const form = new FormData()
-  if (typeof fileOrText === 'string') {
-    form.append('text', fileOrText)
-  } else {
-    form.append('file', fileOrText)
-  }
-  const res = await fetch(`${BASE}/documents`, { method: 'POST', body: form })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-/** Poll processing status. */
-export async function getDocumentStatus(docId: string): Promise<DocumentStatusResponse> {
-  const res = await fetch(`${BASE}/documents/${docId}/status`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
-}
-
-/** Fetch the full results once status === 'done'. */
+/** Fetch full results (claims + verdicts). */
 export async function getDocumentResults(docId: string): Promise<DocumentResults> {
-  const res = await fetch(`${BASE}/documents/${docId}/results`)
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  const res = await fetch(`${BASE}/documents/${docId}/results`);
+  return handleResponse(res);
 }
 
-/** Submit a human review. */
-export async function submitReview(
+/** Trigger CSV export; returns a Blob. */
+export async function exportCsv(docId: string): Promise<Blob> {
+  const res = await fetch(`${BASE}/documents/${docId}/export?format=csv`);
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+  return res.blob();
+}
+
+/** Trigger PDF export; returns a Blob. */
+export async function exportPdf(docId: string): Promise<Blob> {
+  const res = await fetch(`${BASE}/documents/${docId}/export?format=pdf`);
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+  return res.blob();
+}
+
+// ── Claims ────────────────────────────────────────────────────────────────────
+
+export async function getClaim(claimId: string): Promise<ClaimWithVerdicts> {
+  const res = await fetch(`${BASE}/claims/${claimId}`);
+  return handleResponse(res);
+}
+
+// ── Reviews ───────────────────────────────────────────────────────────────────
+
+export interface ReviewPayload {
+  reference_id: string;
+  action: ReviewAction;
+  new_verdict?: VerdictLabel | null;
+  comment?: string;
+  reviewer: string;
+}
+
+export async function postReview(
   claimId: string,
-  body: { action: string; new_verdict?: string; comment: string; reviewer: string }
-): Promise<unknown> {
+  payload: ReviewPayload,
+): Promise<{ review_id: string; timestamp: string }> {
   const res = await fetch(`${BASE}/claims/${claimId}/review`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
 }
 
-/** Export URL (open in new tab). */
-export function exportUrl(docId: string, format: 'csv' | 'pdf'): string {
-  return `${BASE}/documents/${docId}/export?format=${format}`
+export async function getReviews(claimId: string): Promise<Review[]> {
+  const res = await fetch(`${BASE}/claims/${claimId}/reviews`);
+  return handleResponse(res);
+}
+
+// ── Sources ───────────────────────────────────────────────────────────────────
+
+export async function uploadManualSource(
+  referenceId: string,
+  file: File,
+): Promise<{ reference_id: string; status: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/references/${referenceId}/source`, {
+    method: "POST",
+    body: form,
+  });
+  return handleResponse(res);
 }

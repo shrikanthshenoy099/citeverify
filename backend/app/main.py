@@ -1,87 +1,92 @@
 """
 app/main.py – FastAPI application entry point.
 
-Start with:
-    cd citeverify
-    uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
-
-Or from backend/:
-    uvicorn app.main:app --reload
+Owner: M4 (Product & Integration).
 """
 
 from __future__ import annotations
 
 import logging
-import sys
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import init_db
-from app.router import router
+from app.db.session import init_db
+from app.routers.documents import router as documents_router
+from app.routers.claims import router as claims_router
+from app.routers.sources import router_sources, router_references
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stdout,
 )
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup / shutdown lifecycle."""
-    logger.info("CiteVerify API starting up...")
-    init_db()   # synchronous – fine in startup
+    logger.info("CiteVerify starting up – initialising database …")
+    init_db()
+    # Ensure data directories exist
+    from app.config import settings
+    for d in (settings.uploads_dir, settings.sources_dir, settings.cache_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    logger.info("Startup complete.")
     yield
-    logger.info("CiteVerify API shutting down.")
+    logger.info("CiteVerify shutting down.")
 
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="CiteVerify API",
     description=(
         "Scientific claim and citation verification system. "
-        "⚠️ RESEARCH ASSISTANT ONLY — not a final academic judgment."
+        "⚠ All results are intended to ASSIST human reviewers and must not "
+        "be treated as final academic judgments."
     ),
     version="0.1.0",
     lifespan=lifespan,
 )
 
-# ---------------------------------------------------------------------------
-# CORS – allow the Next.js dev server (localhost:3000)
-# ---------------------------------------------------------------------------
+# CORS – allow the Next.js dev server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ---------------------------------------------------------------------------
-# Routes
+# Routers
 # ---------------------------------------------------------------------------
-app.include_router(router)
+
+app.include_router(documents_router)
+app.include_router(claims_router)
+app.include_router(router_sources)
+app.include_router(router_references)
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Root health check
 # ---------------------------------------------------------------------------
-@app.get("/health", tags=["meta"])
-async def health():
-    """Health check endpoint. Returns 200 when the API is running."""
-    return {"status": "ok", "service": "citeverify-api"}
 
-
-@app.get("/", tags=["meta"])
-async def root():
-    return {
-        "service": "CiteVerify API",
-        "docs": "/docs",
-        "health": "/health",
-        "disclaimer": (
-            "This is a research assistant. "
-            "All outputs must be reviewed by qualified human reviewers."
-        ),
-    }
+@app.get("/health", tags=["health"])
+def health():
+    return {"status": "ok", "service": "citeverify"}

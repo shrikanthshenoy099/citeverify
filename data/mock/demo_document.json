@@ -1,0 +1,104 @@
+{
+  "doc_id": "demo-001",
+  "source_type": "text",
+  "num_pages": null,
+  "warnings": ["[MOCK] This is canned demo data – not a real analysis."],
+  "references": [
+    {
+      "reference_id": "demo-001-ref-1",
+      "raw_text": "Smith J, Doe A. Example Paper. Nature. 2020;42:1-10. doi:10.1000/example",
+      "title": "Example Paper",
+      "authors": ["Smith, J.", "Doe, A."],
+      "year": 2020,
+      "doi": "10.1000/example",
+      "venue": "Nature",
+      "parse_confidence": 0.9
+    },
+    {
+      "reference_id": "demo-001-ref-2",
+      "raw_text": "Jones K. Another Study. JAMA. 2015;10:55-62.",
+      "title": "Another Study",
+      "authors": ["Jones, K."],
+      "year": 2015,
+      "doi": null,
+      "venue": "JAMA",
+      "parse_confidence": 0.75
+    },
+    {
+      "reference_id": "demo-001-ref-3",
+      "raw_text": "Green P. Fabricated Results. Lancet. 2021;300:1.",
+      "title": "Fabricated Results",
+      "authors": ["Green, P."],
+      "year": 2021,
+      "doi": "10.1000/fake",
+      "venue": "Lancet",
+      "parse_confidence": 0.6
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "demo-001-claim-1",
+      "doc_id": "demo-001",
+      "text": "The intervention reduced mortality by 42% (Smith et al., 2020).",
+      "page": 1,
+      "section": "Results",
+      "char_start": 0,
+      "char_end": 65,
+      "citation_markers": ["Smith et al., 2020"],
+      "reference_ids": ["demo-001-ref-1"],
+      "claim_type": "numeric",
+      "numbers_mentioned": ["42%"],
+      "context_before": "In a randomised controlled trial of 500 participants,",
+      "context_after": "This was statistically significant (p < 0.01).",
+      "flags": []
+    },
+    {
+      "claim_id": "demo-001-claim-2",
+      "doc_id": "demo-001",
+      "text": "Previous work showed no significant effect (Jones, 2015).",
+      "page": 2,
+      "section": "Introduction",
+      "char_start": 200,
+      "char_end": 258,
+      "citation_markers": ["Jones, 2015"],
+      "reference_ids": ["demo-001-ref-2"],
+      "claim_type": "factual",
+      "numbers_mentioned": [],
+      "context_before": "In contrast to recent findings,",
+      "context_after": "However, methodology differed substantially.",
+      "flags": []
+    },
+    {
+      "claim_id": "demo-001-claim-3",
+      "doc_id": "demo-001",
+      "text": "Green et al. (2021) reported a 95% cure rate in all patients.",
+      "page": 3,
+      "section": "Discussion",
+      "char_start": 400,
+      "char_end": 465,
+      "citation_markers": ["Green et al., 2021"],
+      "reference_ids": ["demo-001-ref-3"],
+      "claim_type": "numeric",
+      "numbers_mentioned": ["95%"],
+      "context_before": "Contrary to our findings,",
+      "context_after": "This result has not been replicated.",
+      "flags": []
+    },
+    {
+      "claim_id": "demo-001-claim-4",
+      "doc_id": "demo-001",
+      "text": "Overall, 73% of studies in this field suffer from publication bias.",
+      "page": 4,
+      "section": "Conclusion",
+      "char_start": 600,
+      "char_end": 665,
+      "citation_markers": [],
+      "reference_ids": [],
+      "claim_type": "conclusion",
+      "numbers_mentioned": ["73%"],
+      "context_before": "Based on a review of the literature,",
+      "context_after": "Further investigation is warranted.",
+      "flags": []
+    }
+  ]
+}

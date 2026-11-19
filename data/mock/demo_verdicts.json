@@ -1,0 +1,121 @@
+[
+  {
+    "claim_id": "demo-001-claim-1",
+    "reference_id": "demo-001-ref-1",
+    "verdict": "supported",
+    "explanation": "The source paper reports a 42% reduction in mortality (p<0.01) in the treatment arm. The claim is accurately stated.",
+    "evidence": {
+      "quote": "The intervention reduced mortality by 42 per cent in the treatment arm (p < 0.01).",
+      "passage_id": "demo-001-ref-1-p1",
+      "page": 3,
+      "section": "Results",
+      "bboxes": [
+        {"x0": 72.0, "y0": 320.5, "x1": 524.0, "y1": 334.0},
+        {"x0": 72.0, "y0": 334.0, "x1": 380.0, "y1": 347.5}
+      ],
+      "page_width": 595.0,
+      "page_height": 842.0
+    },
+    "confidence": 0.88,
+    "confidence_breakdown": {
+      "retrieval": 0.95,
+      "llm_certainty": 0.90,
+      "text_match": 0.85,
+      "full_text": 1.0,
+      "numeric_match": 0.92
+    },
+    "source_trace": {
+      "doi": "10.1000/example",
+      "url": "https://doi.org/10.1000/example",
+      "page": 3,
+      "section": "Results"
+    },
+    "flags": [],
+    "needs_human_review": false
+  },
+  {
+    "claim_id": "demo-001-claim-2",
+    "reference_id": "demo-001-ref-2",
+    "verdict": "partly_supported",
+    "explanation": "The source reports a non-significant trend (p=0.08) but does not use the phrase 'no significant effect'. The claim slightly overstates the finding.",
+    "evidence": {
+      "quote": "The treatment effect did not reach statistical significance (p = 0.08).",
+      "passage_id": "demo-001-ref-2-p1",
+      "page": 5,
+      "section": "Results",
+      "bboxes": [],
+      "page_width": null,
+      "page_height": null
+    },
+    "confidence": 0.62,
+    "confidence_breakdown": {
+      "retrieval": 0.70,
+      "llm_certainty": 0.65,
+      "text_match": 0.60,
+      "full_text": 0.4,
+      "numeric_match": 0.0
+    },
+    "source_trace": {
+      "doi": null,
+      "url": null,
+      "page": 5,
+      "section": "Results"
+    },
+    "flags": ["abstract_only"],
+    "needs_human_review": true
+  },
+  {
+    "claim_id": "demo-001-claim-3",
+    "reference_id": "demo-001-ref-3",
+    "verdict": "contradictory",
+    "explanation": "The cited paper reports no such cure rate. The closest figure found is a 12% improvement in one subgroup. The claim directly contradicts the source.",
+    "evidence": {
+      "quote": "A 12 per cent improvement was observed in the high-dose subgroup only.",
+      "passage_id": "demo-001-ref-3-p1",
+      "page": 7,
+      "section": "Discussion",
+      "bboxes": [],
+      "page_width": null,
+      "page_height": null
+    },
+    "confidence": 0.20,
+    "confidence_breakdown": {
+      "retrieval": 0.75,
+      "llm_certainty": 0.15,
+      "text_match": 0.10,
+      "full_text": 0.70,
+      "numeric_match": 0.0
+    },
+    "source_trace": {
+      "doi": "10.1000/fake",
+      "url": "https://doi.org/10.1000/fake",
+      "page": 7,
+      "section": "Discussion"
+    },
+    "flags": ["number_not_found", "scope_mismatch"],
+    "needs_human_review": true
+  },
+  {
+    "claim_id": "demo-001-claim-4",
+    "reference_id": "__no_citation__",
+    "verdict": "needs_review",
+    "explanation": "This claim has no citation. It cannot be verified against a source.",
+    "evidence": null,
+    "confidence": 0.0,
+    "confidence_breakdown": {
+      "retrieval": 0.0,
+      "llm_certainty": 0.0,
+      "text_match": 0.0,
+      "full_text": 0.0,
+      "numeric_match": 0.0
+    },
+    "source_trace": {
+      "doi": null,
+      "url": null,
+      "page": null,
+      "section": null
+    },
+    "flags": ["no_citation"],
+    "needs_human_review": true
+  }
+]

@@ -1,12 +1,57 @@
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
 .venv/
 venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+env/
+.env
+*.env
+
+# Node / Next.js
 node_modules/
-.next/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+
+# Data (never commit uploads, sources, cache, or model weights)
 data/uploads/
 data/sources/
 data/cache/
+*.npy
+*.onnx
+*.bin
+*.pt
+*.safetensors
+
+# DB
 *.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml

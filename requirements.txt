@@ -1,6 +1,6 @@
-# requirements.txt – root umbrella.
-# Install everything with: pip install -r requirements.txt
-# Or install per-module: pip install -r requirements-mX.txt
+# requirements.txt – Root requirements that include all module deps.
+# Install with: pip install -r requirements.txt
+# (Python 3.11 required for all modules)
 
 -r requirements-m1.txt
 -r requirements-m2.txt

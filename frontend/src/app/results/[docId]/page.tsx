@@ -1,330 +1,362 @@
-'use client'
+"use client";
 
-import { useEffect, useState, useCallback } from 'react'
-import { useParams } from 'next/navigation'
-import {
-  getDocumentStatus,
-  getDocumentResults,
-  exportUrl,
-  submitReview,
-  DocumentResults,
-  VerdictItem,
-  ClaimItem,
-} from '@/lib/api'
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "next/navigation";
+import { getDocumentStatus, getDocumentResults, exportCsv } from "@/lib/api";
+import type { ClaimWithVerdicts, DocumentResults, VerdictLabel } from "@/lib/types";
+import { ClaimCard } from "@/components/ClaimCard";
+import { VerdictBadge } from "@/components/VerdictBadge";
 
-const VERDICT_STYLES: Record<string, string> = {
-  supported: 'bg-green-100 text-green-800 border-green-300',
-  partly_supported: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  unsupported: 'bg-red-100 text-red-800 border-red-300',
-  contradictory: 'bg-purple-100 text-purple-800 border-purple-300',
-  possibly_outdated: 'bg-orange-100 text-orange-800 border-orange-300',
-  needs_review: 'bg-gray-100 text-gray-700 border-gray-300',
+const POLL_INTERVAL_MS = 2000;
+const TERMINAL_STATUSES = new Set(["done", "error"]);
+
+const PIPELINE_STAGES = ["pending", "parsing", "retrieving", "verifying", "done"] as const;
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-function VerdictBadge({ verdict }: { verdict: string }) {
-  const cls = VERDICT_STYLES[verdict] ?? 'bg-gray-100 text-gray-700 border-gray-300'
-  return (
-    <span className={`inline-block border rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${cls}`}>
-      {verdict.replace(/_/g, ' ')}
-    </span>
-  )
-}
-
-function ConfidenceBar({ value }: { value: number }) {
-  const pct = Math.round(value * 100)
-  const color = pct >= 70 ? 'bg-green-500' : pct >= 45 ? 'bg-yellow-400' : 'bg-red-400'
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 bg-gray-200 rounded-full h-1.5">
-        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs text-gray-500 w-8 text-right">{pct}%</span>
-    </div>
-  )
-}
-
-function ReviewForm({
-  claimId,
-  onDone,
-}: {
-  claimId: string
-  onDone: () => void
-}) {
-  const [action, setAction] = useState('comment')
-  const [newVerdict, setNewVerdict] = useState('')
-  const [comment, setComment] = useState('')
-  const [reviewer, setReviewer] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  const handleSubmit = async () => {
-    if (!reviewer.trim()) { setErr('Reviewer name required.'); return }
-    setSubmitting(true)
-    setErr(null)
-    try {
-      await submitReview(claimId, {
-        action,
-        new_verdict: action === 'override' ? newVerdict : undefined,
-        comment,
-        reviewer,
-      })
-      onDone()
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSubmitting(false)
+/** Counts per verdict label across all verdicts in results */
+function countVerdicts(claims: ClaimWithVerdicts[]) {
+  const counts: Partial<Record<VerdictLabel, number>> = {};
+  let needsReview = 0;
+  for (const c of claims) {
+    for (const v of c.verdicts) {
+      counts[v.verdict] = (counts[v.verdict] ?? 0) + 1;
+      if (v.needs_human_review) needsReview++;
     }
   }
-
-  return (
-    <div className="mt-3 bg-gray-50 border border-gray-200 rounded p-3 space-y-2 text-sm">
-      <div className="flex gap-2 flex-wrap">
-        {['accept', 'reject', 'comment', 'override'].map(a => (
-          <button
-            key={a}
-            onClick={() => setAction(a)}
-            className={`px-2 py-1 rounded text-xs border ${action === a ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'}`}
-          >
-            {a}
-          </button>
-        ))}
-      </div>
-      {action === 'override' && (
-        <select
-          className="border rounded px-2 py-1 text-xs w-full"
-          value={newVerdict}
-          onChange={e => setNewVerdict(e.target.value)}
-        >
-          <option value="">— select new verdict —</option>
-          {['supported','partly_supported','unsupported','contradictory','possibly_outdated','needs_review'].map(v => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-        </select>
-      )}
-      <textarea
-        className="w-full border rounded px-2 py-1 text-xs h-14 resize-none"
-        placeholder="Comment (optional)"
-        value={comment}
-        onChange={e => setComment(e.target.value)}
-      />
-      <input
-        className="border rounded px-2 py-1 text-xs w-full"
-        placeholder="Your name (required)"
-        value={reviewer}
-        onChange={e => setReviewer(e.target.value)}
-      />
-      {err && <p className="text-red-600 text-xs">{err}</p>}
-      <button
-        onClick={handleSubmit}
-        disabled={submitting}
-        className="bg-blue-600 disabled:bg-blue-300 text-white text-xs rounded px-3 py-1"
-      >
-        {submitting ? 'Submitting…' : 'Submit Review'}
-      </button>
-    </div>
-  )
+  return { counts, needsReview };
 }
 
-function ClaimCard({ claim }: { claim: ClaimItem }) {
-  const [expanded, setExpanded] = useState(false)
-  const [reviewing, setReviewing] = useState(false)
-
+function StageBar({ status }: { status: string }) {
+  const idx = PIPELINE_STAGES.indexOf(status as typeof PIPELINE_STAGES[number]);
+  const labels: Record<string, string> = {
+    pending: "Queued",
+    parsing: "Parsing document",
+    retrieving: "Retrieving sources",
+    verifying: "Verifying claims",
+    done: "Complete",
+  };
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-2">
-      {/* Claim text */}
-      <p className="text-sm">{claim.text}</p>
-
-      {/* Meta */}
-      <div className="flex flex-wrap gap-2 text-xs text-gray-500">
-        {claim.page && <span>p.{claim.page}</span>}
-        {claim.section && <span>§ {claim.section}</span>}
-        <span className="font-medium text-gray-700">{claim.claim_type}</span>
-        {claim.flags.map(f => (
-          <span key={f} className="bg-gray-100 border border-gray-200 rounded px-1">{f}</span>
-        ))}
-      </div>
-
-      {/* Verdicts */}
-      {claim.verdicts.length === 0 ? (
-        <p className="text-xs text-gray-400 italic">No citations verified.</p>
-      ) : (
-        claim.verdicts.map((v: VerdictItem) => (
-          <div key={v.reference_id} className="border border-gray-100 rounded p-2 space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <VerdictBadge verdict={v.verdict} />
-              <ConfidenceBar value={v.confidence} />
-              {v.needs_human_review && (
-                <span className="text-xs bg-amber-100 border border-amber-300 text-amber-800 rounded px-1 py-0.5">
-                  ⚠ human review required
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-gray-600">{v.explanation}</p>
-            {v.evidence?.quote && (
-              <blockquote className="text-xs italic border-l-2 border-blue-300 pl-2 text-gray-600">
-                "{v.evidence.quote}"
-              </blockquote>
-            )}
-            {v.source_trace.doi && (
-              <a
-                href={`https://doi.org/${v.source_trace.doi}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-600 underline"
-              >
-                doi:{v.source_trace.doi}
-              </a>
+    <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-6">
+      <div className="flex items-center gap-1 mb-2 flex-wrap">
+        {PIPELINE_STAGES.map((stage, i) => (
+          <div key={stage} className="flex items-center gap-1">
+            <span
+              className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${
+                stage === status
+                  ? "bg-blue-600 text-white animate-pulse"
+                  : i < idx
+                  ? "bg-blue-200 text-blue-800"
+                  : "bg-gray-100 text-gray-400"
+              }`}
+            >
+              {labels[stage]}
+            </span>
+            {i < PIPELINE_STAGES.length - 1 && (
+              <span className="text-gray-300 text-xs">→</span>
             )}
           </div>
-        ))
-      )}
-
-      {/* Review toggle */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => setReviewing(r => !r)}
-          className="text-xs text-blue-600 underline"
-        >
-          {reviewing ? 'Cancel review' : 'Add review'}
-        </button>
-        {claim.verdicts.length > 0 && (
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="text-xs text-gray-500 underline"
-          >
-            {expanded ? 'Hide details' : 'Show confidence breakdown'}
-          </button>
-        )}
+        ))}
       </div>
+      <div className="w-full bg-blue-100 rounded-full h-1.5">
+        <div
+          className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+          style={{ width: `${Math.max(5, (Math.max(0, idx) / (PIPELINE_STAGES.length - 1)) * 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
 
-      {expanded && claim.verdicts.map(v => (
-        <div key={v.reference_id + '_bd'} className="text-xs bg-gray-50 rounded p-2 space-y-1">
-          <p className="font-medium">Confidence breakdown – {v.reference_id}</p>
-          {Object.entries(v.confidence_breakdown).map(([k, val]) => (
-            <div key={k} className="flex justify-between">
-              <span className="text-gray-500">{k}</span>
-              <span>{(val as number).toFixed(2)}</span>
-            </div>
-          ))}
+function SummaryCards({
+  claims,
+  needsReview,
+  counts,
+}: {
+  claims: ClaimWithVerdicts[];
+  needsReview: number;
+  counts: Partial<Record<VerdictLabel, number>>;
+}) {
+  const verdictOrder: VerdictLabel[] = [
+    "supported", "partly_supported", "unsupported",
+    "contradictory", "possibly_outdated", "needs_review",
+  ];
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+      <div className="bg-white border border-gray-200 rounded-lg p-3">
+        <div className="text-2xl font-bold text-gray-900">{claims.length}</div>
+        <div className="text-xs text-gray-500 mt-0.5">Claims found</div>
+      </div>
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+        <div className="text-2xl font-bold text-amber-700">{needsReview}</div>
+        <div className="text-xs text-amber-600 mt-0.5">Needs human review</div>
+      </div>
+      {verdictOrder.filter((v) => counts[v]).map((v) => (
+        <div key={v} className="bg-white border border-gray-200 rounded-lg p-3 flex items-center gap-2">
+          <div className="text-xl font-bold text-gray-900">{counts[v]}</div>
+          <VerdictBadge verdict={v} />
         </div>
       ))}
-
-      {reviewing && (
-        <ReviewForm claimId={claim.claim_id} onDone={() => setReviewing(false)} />
-      )}
     </div>
-  )
+  );
 }
 
+type FilterState = {
+  verdict: VerdictLabel | "all";
+  needsReview: "all" | "yes" | "no";
+  flag: string;
+  reviewed: "all" | "yes" | "no";
+  search: string;
+};
+
 export default function ResultsPage() {
-  const { docId } = useParams<{ docId: string }>()
-  const [results, setResults] = useState<DocumentResults | null>(null)
-  const [status, setStatus] = useState<string>('pending')
-  const [error, setError] = useState<string | null>(null)
+  const { docId } = useParams<{ docId: string }>();
+  const [status, setStatus] = useState<string>("pending");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [results, setResults] = useState<DocumentResults | null>(null);
+  const [exporting, setExporting] = useState<"csv" | "print" | null>(null);
+  const [filters, setFilters] = useState<FilterState>({
+    verdict: "all",
+    needsReview: "all",
+    flag: "",
+    reviewed: "all",
+    search: "",
+  });
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const poll = useCallback(async () => {
+  const fetchResults = useCallback(async () => {
     try {
-      const s = await getDocumentStatus(docId)
-      setStatus(s.status)
-      if (s.status === 'done') {
-        const r = await getDocumentResults(docId)
-        setResults(r)
-      } else if (s.status === 'error') {
-        setError('Pipeline failed. See backend logs.')
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e))
+      const data = await getDocumentResults(docId);
+      setResults(data);
+      setStatus(data.status);
+    } catch {
+      // results not ready yet – fine
     }
-  }, [docId])
+  }, [docId]);
 
+  // Poll status and also fetch partial results during pipeline
   useEffect(() => {
-    poll()
-    if (status === 'pending' || status === 'processing') {
-      const id = setInterval(poll, 2000)
-      return () => clearInterval(id)
+    intervalRef.current = setInterval(async () => {
+      try {
+        const s = await getDocumentStatus(docId);
+        setStatus(s.status);
+        setErrorMsg(s.error_message ?? null);
+        // Fetch partial results at every poll so table updates incrementally
+        fetchResults();
+        if (TERMINAL_STATUSES.has(s.status)) {
+          clearInterval(intervalRef.current!);
+        }
+      } catch {
+        clearInterval(intervalRef.current!);
+      }
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [docId, fetchResults]);
+
+  async function handleExportCsv() {
+    setExporting("csv");
+    try {
+      const blob = await exportCsv(docId);
+      downloadBlob(blob, `citeverify-${docId}.csv`);
+    } catch (err) {
+      alert(`Export failed: ${err}`);
+    } finally {
+      setExporting(null);
     }
-  }, [poll, status])
-
-  if (error) {
-    return <p className="text-red-600 bg-red-50 border border-red-200 rounded p-4">{error}</p>
   }
 
-  if (!results) {
-    return (
-      <div className="space-y-3">
-        <p className="text-gray-600">Processing… status: <strong>{status}</strong></p>
-        <div className="animate-pulse h-4 bg-gray-200 rounded w-1/3" />
-        <div className="animate-pulse h-4 bg-gray-200 rounded w-1/2" />
-        <div className="animate-pulse h-4 bg-gray-200 rounded w-2/5" />
-      </div>
-    )
+  function handlePrint() {
+    window.print();
   }
 
-  const needsReview = results.claims.flatMap(c => c.verdicts).filter(v => v.needs_human_review)
+  // Collect all unique flags across verdicts for the flag filter dropdown
+  const allFlags = results
+    ? Array.from(new Set(results.claims.flatMap((c) => [
+        ...c.flags,
+        ...c.verdicts.flatMap((v) => v.flags),
+      ]))).sort()
+    : [];
+
+  // Apply filters
+  const filteredClaims: ClaimWithVerdicts[] = (results?.claims ?? []).filter((claim) => {
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      if (
+        !claim.text.toLowerCase().includes(q) &&
+        !claim.citation_markers.join(" ").toLowerCase().includes(q)
+      )
+        return false;
+    }
+    if (filters.needsReview === "yes" && !claim.verdicts.some((v) => v.needs_human_review))
+      return false;
+    if (filters.needsReview === "no" && claim.verdicts.some((v) => v.needs_human_review))
+      return false;
+    if (filters.verdict !== "all" && !claim.verdicts.some((v) => v.verdict === filters.verdict))
+      return false;
+    if (filters.flag && !claim.flags.includes(filters.flag) &&
+        !claim.verdicts.some((v) => v.flags.includes(filters.flag)))
+      return false;
+    return true;
+  });
+
+  const { counts, needsReview } = results
+    ? countVerdicts(results.claims)
+    : { counts: {}, needsReview: 0 };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Verification Report</h1>
-          <p className="text-sm text-gray-500 font-mono">{docId}</p>
-        </div>
-        <div className="flex gap-2">
-          <a
-            href={exportUrl(docId, 'csv')}
-            className="text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50"
-          >
-            ↓ CSV
-          </a>
-          <a
-            href={exportUrl(docId, 'pdf')}
-            className="text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50"
-          >
-            ↓ PDF
-          </a>
-        </div>
+    <>
+      {/* Print-only disclaimer */}
+      <div className="hidden print:block text-xs text-center border border-gray-300 rounded p-2 mb-4">
+        Automated analysis to assist human review. Not a final academic judgment.
+        Results must be independently verified.
       </div>
 
-      {/* Disclaimer */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
-        <strong>⚠ Research assistant only.</strong> This report must not be treated as a final
-        academic judgment. {needsReview.length > 0 && (
-          <span>{needsReview.length} verdict(s) require human review.</span>
-        )}
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3 text-center">
-        {[
-          ['Claims', results.claims.length],
-          ['References', results.references.length],
-          ['Need review', needsReview.length],
-        ].map(([label, val]) => (
-          <div key={String(label)} className="bg-white border border-gray-200 rounded-lg py-4">
-            <div className="text-2xl font-bold">{val}</div>
-            <div className="text-xs text-gray-500 mt-1">{label}</div>
+      <div className="print:hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-bold">Verification results</h1>
+            <p className="text-xs text-gray-400 font-mono mt-0.5">{docId}</p>
           </div>
-        ))}
+          {results && status === "done" && (
+            <div className="flex gap-2">
+              <button
+                onClick={handleExportCsv}
+                disabled={exporting !== null}
+                className="text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {exporting === "csv" ? "Exporting…" : "Export CSV"}
+              </button>
+              <button
+                onClick={handlePrint}
+                className="text-xs bg-white border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50"
+              >
+                Print / Save as PDF
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Stage progress bar */}
+        {!TERMINAL_STATUSES.has(status) && <StageBar status={status} />}
+
+        {status === "error" && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-6 text-sm text-red-700">
+            <strong>Pipeline error:</strong> {errorMsg ?? "Unknown error."}
+          </div>
+        )}
+
+        {/* Disclaimer */}
+        <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-800 mb-4">
+          Automated analysis to assist human review. <strong>Not a final academic judgment.</strong>{" "}
+          Confidence scores are not a guarantee of accuracy.
+        </div>
       </div>
 
-      {/* Warnings */}
-      {results.warnings.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs space-y-1">
-          <p className="font-medium text-yellow-900">Processing warnings:</p>
-          {results.warnings.map((w, i) => (
-            <p key={i} className="font-mono text-yellow-800">{w}</p>
-          ))}
-        </div>
+      {/* Results — visible during pipeline too (partial) */}
+      {results && (
+        <>
+          {/* Summary cards */}
+          <SummaryCards claims={results.claims} needsReview={needsReview} counts={counts} />
+
+          {/* Filters */}
+          <div className="flex flex-wrap gap-2 mb-4 print:hidden">
+            <input
+              type="search"
+              placeholder="Search claims…"
+              value={filters.search}
+              onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+              className="border border-gray-300 rounded px-2 py-1 text-xs flex-1 min-w-[180px] focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <select
+              value={filters.verdict}
+              onChange={(e) => setFilters((f) => ({ ...f, verdict: e.target.value as FilterState["verdict"] }))}
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            >
+              <option value="all">All verdicts</option>
+              <option value="supported">Supported</option>
+              <option value="partly_supported">Partly supported</option>
+              <option value="unsupported">Unsupported</option>
+              <option value="contradictory">Contradictory</option>
+              <option value="possibly_outdated">Possibly outdated</option>
+              <option value="needs_review">Needs review</option>
+            </select>
+            <select
+              value={filters.needsReview}
+              onChange={(e) => setFilters((f) => ({ ...f, needsReview: e.target.value as FilterState["needsReview"] }))}
+              className="border border-gray-300 rounded px-2 py-1 text-xs"
+            >
+              <option value="all">Any review status</option>
+              <option value="yes">Needs human review</option>
+              <option value="no">No review needed</option>
+            </select>
+            {allFlags.length > 0 && (
+              <select
+                value={filters.flag}
+                onChange={(e) => setFilters((f) => ({ ...f, flag: e.target.value }))}
+                className="border border-gray-300 rounded px-2 py-1 text-xs"
+              >
+                <option value="">Any flag</option>
+                {allFlags.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            )}
+            {(filters.search || filters.verdict !== "all" || filters.needsReview !== "all" || filters.flag) && (
+              <button
+                onClick={() => setFilters({ verdict: "all", needsReview: "all", flag: "", reviewed: "all", search: "" })}
+                className="text-xs text-gray-500 hover:text-gray-700 underline"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          <div className="text-xs text-gray-500 mb-3">
+            Showing {filteredClaims.length} of {results.claims.length} claim{results.claims.length !== 1 ? "s" : ""}
+            {status !== "done" && <span className="ml-2 text-blue-500 animate-pulse">· pipeline still running…</span>}
+          </div>
+
+          <div className="space-y-3">
+            {filteredClaims.map((claim) => (
+              <ClaimCard
+                key={claim.claim_id}
+                claim={claim}
+                references={results.references}
+                onRefresh={fetchResults}
+              />
+            ))}
+          </div>
+
+          {filteredClaims.length === 0 && (
+            <p className="text-gray-500 text-sm mt-6 text-center">
+              {results.claims.length === 0
+                ? "No verifiable claims were found in this document."
+                : "No claims match the current filters."}
+            </p>
+          )}
+        </>
       )}
 
-      {/* Claims */}
-      <div className="space-y-3">
-        {results.claims.length === 0 ? (
-          <p className="text-gray-500 italic text-sm">No checkable claims found.</p>
-        ) : (
-          results.claims.map(claim => <ClaimCard key={claim.claim_id} claim={claim} />)
-        )}
-      </div>
-    </div>
-  )
+      {/* Print styles */}
+      <style>{`
+        @media print {
+          .print\\:hidden { display: none !important; }
+          .print\\:block { display: block !important; }
+          body { background: white; }
+          .border { border-color: #e5e7eb !important; }
+        }
+      `}</style>
+    </>
+  );
 }

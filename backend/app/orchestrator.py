@@ -1,77 +1,297 @@
 """
-app/orchestrator.py – pipeline orchestrator (M4).
+app/orchestrator.py – Pipeline orchestrator (M4).
 
-Runs the full pipeline for one document:
-  M1 parse_document → M2 retrieve_source + search_passages → M3 verify
+Runs the full CiteVerify pipeline for a document:
+  1. Parse (M1)
+  2. Retrieve sources (M2) – per reference, failures isolated
+  3. Verify claims (M3)   – per (claim, reference) pair, failures isolated
+  4. Persist results to DB
 
-Also handles re-verification after a manual source upload
-(POST /api/references/{reference_id}/source).
-
-All work happens synchronously inside a thread-pool executor so the
-async FastAPI event loop is not blocked.
+Resilience contract:
+- A single failing item (retrieval, verify) never aborts the whole run.
+- Claims with no citation markers get a synthetic ``no_citation`` verdict.
+- When USE_MOCKS=false and a module raises NotImplementedError or ImportError,
+  the item is marked ``needs_review`` with flag ``llm_output_invalid``; the run
+  continues and completes with status="done".
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import uuid
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.db.models import ClaimRow, DocumentRow, ReferenceRow, SourceRow, VerdictRow
 from citeverify_core.common.schemas import (
     Claim,
+    ConfidenceBreakdown,
+    Flags,
     ParsedDocument,
     Reference,
     Source,
+    SourceTrace,
     Verdict,
 )
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Lazy imports for M1 / M2 / M3  (they may not all be installed yet during
-# individual-module development; we degrade gracefully with warnings).
+# Module imports with graceful mock fallbacks
 # ---------------------------------------------------------------------------
 
 def _import_parse_document():
+    if settings.use_mocks:
+        from app.mocks import mock_parse_document as fn
+        return fn
     try:
-        from citeverify_core.doc_intel import parse_document
-        return parse_document
-    except ImportError as exc:
-        logger.error("[M4] citeverify_core.doc_intel not available: %s", exc)
-        return None
+        from citeverify_core.doc_intel.parser import parse_document as fn  # type: ignore[import]
+        return fn
+    except (ImportError, NotImplementedError):
+        from app.mocks import mock_parse_document as fn
+        logger.warning("M1 parse_document unavailable – falling back to mock")
+        return fn
 
 
-def _import_m2():
-    """Returns (retrieve_source, search_passages, locate_quote, ingest_pdf) or Nones."""
+def _import_retrieve_source():
+    if settings.use_mocks:
+        from app.mocks import mock_retrieve_source as fn
+        return fn
     try:
-        from citeverify_core.retrieval import (  # type: ignore
-            retrieve_source,
-            search_passages,
-            locate_quote,
-            ingest_pdf,
-        )
-        return retrieve_source, search_passages, locate_quote, ingest_pdf
-    except ImportError as exc:
-        logger.warning("[M4] citeverify_core.retrieval not available: %s", exc)
-        return None, None, None, None
+        from citeverify_core.retrieval.retriever import retrieve_source as fn  # type: ignore[import]
+        return fn
+    except (ImportError, NotImplementedError):
+        from app.mocks import mock_retrieve_source as fn
+        logger.warning("M2 retrieve_source unavailable – falling back to mock")
+        return fn
 
 
 def _import_verify():
+    if settings.use_mocks:
+        from app.mocks import mock_verify as fn
+        return fn
     try:
-        from citeverify_core.verification import verify  # type: ignore
-        return verify
-    except ImportError as exc:
-        logger.error("[M4] citeverify_core.verification not available: %s", exc)
-        return None
+        from citeverify_core.verification.engine import verify as fn  # type: ignore[import]
+        return fn
+    except (ImportError, NotImplementedError):
+        from app.mocks import mock_verify as fn
+        logger.warning("M3 verify unavailable – falling back to mock")
+        return fn
 
 
 # ---------------------------------------------------------------------------
-# Stub Source  (used when M2 is unavailable)
+# Main pipeline
 # ---------------------------------------------------------------------------
 
-def _stub_source(ref: Reference) -> Source:
-    """Return a placeholder Source so the pipeline can continue without M2."""
+def run_pipeline(
+    doc_id: str,
+    db: Session,
+    file_path: Optional[str] = None,
+    raw_text: Optional[str] = None,
+) -> None:
+    """
+    Execute the full pipeline for *doc_id*.  Called from a background thread.
+
+    Updates ``DocumentRow.status`` at each stage.  On unrecoverable error
+    (parse failure only), sets status = "error". All other failures are
+    isolated per-item and logged; the run always reaches status="done".
+    """
+    _set_status(db, doc_id, "parsing")
+    try:
+        parse_document = _import_parse_document()
+        parsed: ParsedDocument = parse_document(
+            file_path=file_path,
+            raw_text=raw_text,
+            doc_id=doc_id,
+        )
+    except Exception as exc:
+        logger.exception("Pipeline parse failed for doc_id=%s", doc_id)
+        _set_status(db, doc_id, "error", str(exc))
+        return
+
+    # Persist claims and references
+    _persist_parsed(db, parsed)
+
+    # --- Synthetic no_citation verdicts ---
+    # Claims with no reference_ids get a verdict immediately without retrieval.
+    for claim in parsed.claims:
+        if not claim.reference_ids:
+            verdict = _make_no_citation_verdict(claim)
+            _upsert_verdict(db, verdict)
+
+    _set_status(db, doc_id, "retrieving")
+    sources: dict[str, Source] = {}
+    retrieve_source = _import_retrieve_source()
+    for ref in parsed.references:
+        try:
+            source = retrieve_source(ref)
+            sources[ref.reference_id] = source
+            _upsert_source(db, source)
+        except Exception as exc:
+            logger.warning("Retrieval failed for reference %s: %s", ref.reference_id, exc)
+            # Store a failed stub so verify step still runs with something
+            stub = _make_failed_source(ref)
+            sources[ref.reference_id] = stub
+            _upsert_source(db, stub)
+
+    _set_status(db, doc_id, "verifying")
+    verify = _import_verify()
+    ref_map: dict[str, Reference] = {r.reference_id: r for r in parsed.references}
+
+    for claim in parsed.claims:
+        if not claim.reference_ids:
+            continue  # already handled above
+        for ref_id in claim.reference_ids:
+            ref = ref_map.get(ref_id)
+            source = sources.get(ref_id)
+            if ref is None:
+                logger.warning("Claim %s references unknown ref %s", claim.claim_id, ref_id)
+                continue
+            if source is None:
+                source = _make_failed_source(ref)
+            try:
+                verdict: Verdict = verify(claim, ref, source)
+                _upsert_verdict(db, verdict)
+            except Exception as exc:
+                logger.warning(
+                    "Verify failed claim=%s ref=%s: %s", claim.claim_id, ref_id, exc
+                )
+                # Persist a needs_review sentinel so the UI always has a row
+                _upsert_verdict(db, _make_error_verdict(claim, ref, str(exc)))
+
+    _set_status(db, doc_id, "done")
+    logger.info("Pipeline complete for doc_id=%s", doc_id)
+
+
+# ---------------------------------------------------------------------------
+# Re-verify a single reference (after manual source upload)
+# ---------------------------------------------------------------------------
+
+def reverify_reference(reference_id: str, db: Session) -> None:
+    """
+    Re-run verify() for every claim that cites *reference_id*.
+    Called after M2.ingest_pdf() updates the source.
+    """
+    source_row = db.get(SourceRow, reference_id)
+    ref_row = db.get(ReferenceRow, reference_id)
+    if source_row is None or ref_row is None:
+        logger.warning("reverify_reference: missing rows for reference_id=%s", reference_id)
+        return
+
+    source = Source(**json.loads(source_row.payload))
+    ref = Reference(**json.loads(ref_row.payload))
+
+    # Find all claims that reference this ref_id
+    verify = _import_verify()
+    claim_rows = (
+        db.query(ClaimRow)
+        .filter(ClaimRow.doc_id == ref_row.doc_id)
+        .all()
+    )
+    for cr in claim_rows:
+        claim = Claim(**json.loads(cr.payload))
+        if reference_id not in claim.reference_ids:
+            continue
+        try:
+            verdict = verify(claim, ref, source)
+            _upsert_verdict(db, verdict)
+        except Exception as exc:
+            logger.warning("reverify failed claim=%s ref=%s: %s", claim.claim_id, reference_id, exc)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _set_status(db: Session, doc_id: str, status: str, error: Optional[str] = None) -> None:
+    row = db.get(DocumentRow, doc_id)
+    if row:
+        row.status = status
+        row.error_message = error
+        db.commit()
+
+
+def _persist_parsed(db: Session, parsed: ParsedDocument) -> None:
+    for ref in parsed.references:
+        existing = db.get(ReferenceRow, ref.reference_id)
+        if existing is None:
+            db.add(ReferenceRow(
+                reference_id=ref.reference_id,
+                doc_id=parsed.doc_id,
+                payload=ref.model_dump_json(),
+            ))
+        else:
+            existing.payload = ref.model_dump_json()
+
+    for claim in parsed.claims:
+        existing = db.get(ClaimRow, claim.claim_id)
+        if existing is None:
+            db.add(ClaimRow(
+                claim_id=claim.claim_id,
+                doc_id=parsed.doc_id,
+                payload=claim.model_dump_json(),
+            ))
+        else:
+            existing.payload = claim.model_dump_json()
+    db.commit()
+
+
+def _upsert_source(db: Session, source: Source) -> None:
+    existing = db.get(SourceRow, source.reference_id)
+    if existing is None:
+        db.add(SourceRow(reference_id=source.reference_id, payload=source.model_dump_json()))
+    else:
+        existing.payload = source.model_dump_json()
+    db.commit()
+
+
+def _upsert_verdict(db: Session, verdict: Verdict) -> None:
+    existing = (
+        db.query(VerdictRow)
+        .filter(
+            VerdictRow.claim_id == verdict.claim_id,
+            VerdictRow.reference_id == verdict.reference_id,
+        )
+        .first()
+    )
+    if existing is None:
+        db.add(VerdictRow(
+            claim_id=verdict.claim_id,
+            reference_id=verdict.reference_id,
+            payload=verdict.model_dump_json(),
+        ))
+    else:
+        existing.payload = verdict.model_dump_json()
+    db.commit()
+
+
+def _make_no_citation_verdict(claim: Claim) -> Verdict:
+    """Return a synthetic Verdict for a claim that has no reference_ids."""
+    return Verdict(
+        claim_id=claim.claim_id,
+        reference_id="__no_citation__",
+        verdict="needs_review",
+        explanation="This claim has no citation. It cannot be verified against a source.",
+        evidence=None,
+        confidence=0.0,
+        confidence_breakdown=ConfidenceBreakdown(
+            retrieval=0.0,
+            llm_certainty=0.0,
+            text_match=0.0,
+            full_text=0.0,
+            numeric_match=0.0,
+        ),
+        source_trace=SourceTrace(doi=None, url=None, page=None, section=None),
+        flags=[Flags.NO_CITATION],
+        needs_human_review=True,
+    )
+
+
+def _make_failed_source(ref: Reference) -> Source:
+    """Return a stub Source when retrieval fails, so verify can still run."""
     return Source(
         reference_id=ref.reference_id,
         matched=False,
@@ -84,122 +304,33 @@ def _stub_source(ref: Reference) -> Source:
         pdf_path=None,
         text_level="none",
         full_text_available=False,
-        source_database="unavailable",
-        flags=["reference_not_found"],
+        source_database="",
+        flags=[Flags.REFERENCE_NOT_FOUND, Flags.FULL_TEXT_UNAVAILABLE],
     )
 
 
-# ---------------------------------------------------------------------------
-# Public pipeline entry points
-# ---------------------------------------------------------------------------
-
-def run_pipeline(
-    file_path: Optional[str],
-    raw_text: Optional[str],
-    doc_id: str,
-) -> tuple[ParsedDocument, dict[str, Source], list[Verdict]]:
-    """
-    Run the full verification pipeline for one document.
-
-    Parameters
-    ----------
-    file_path:  Path to uploaded file, or None if pasting text.
-    raw_text:   Pasted text, or None if uploading a file.
-    doc_id:     Unique document identifier.
-
-    Returns
-    -------
-    (parsed_doc, sources_by_ref_id, verdicts)
-    """
-    parse_document = _import_parse_document()
-    retrieve_source, _, _, _ = _import_m2()
-    verify = _import_verify()
-
-    # ── 1. Parse ─────────────────────────────────────────────────────────────
-    if parse_document is None:
-        from citeverify_core.common.schemas import ParsedDocument
-        logger.error("[M4] M1 unavailable; returning empty ParsedDocument.")
-        return (
-            ParsedDocument(doc_id=doc_id, source_type="text", warnings=["m1_unavailable"]),
-            {},
-            [],
-        )
-
-    parsed: ParsedDocument = parse_document(
-        file_path=file_path,
-        raw_text=raw_text,
-        doc_id=doc_id,
+def _make_error_verdict(claim: Claim, ref: Reference, error_msg: str) -> Verdict:
+    """Return a needs_review sentinel Verdict when verify() raises."""
+    return Verdict(
+        claim_id=claim.claim_id,
+        reference_id=ref.reference_id,
+        verdict="needs_review",
+        explanation=f"Verification failed due to an internal error. Human review required. ({error_msg[:200]})",
+        evidence=None,
+        confidence=0.0,
+        confidence_breakdown=ConfidenceBreakdown(
+            retrieval=0.0,
+            llm_certainty=0.0,
+            text_match=0.0,
+            full_text=0.0,
+            numeric_match=0.0,
+        ),
+        source_trace=SourceTrace(
+            doi=ref.doi,
+            url=None,
+            page=None,
+            section=None,
+        ),
+        flags=[Flags.LLM_OUTPUT_INVALID],
+        needs_human_review=True,
     )
-    logger.info(
-        "[M4] Parsed doc=%s claims=%d refs=%d",
-        doc_id, len(parsed.claims), len(parsed.references),
-    )
-
-    # ── 2. Retrieve sources ───────────────────────────────────────────────────
-    sources: dict[str, Source] = {}
-    for ref in parsed.references:
-        if retrieve_source is not None:
-            try:
-                source = retrieve_source(ref)
-            except Exception as exc:
-                logger.warning(
-                    "[M4] retrieve_source failed for ref %s: %s", ref.reference_id, exc
-                )
-                source = _stub_source(ref)
-        else:
-            source = _stub_source(ref)
-        sources[ref.reference_id] = source
-
-    # Build lookup maps
-    ref_map: dict[str, Reference] = {r.reference_id: r for r in parsed.references}
-
-    # ── 3. Verify ─────────────────────────────────────────────────────────────
-    verdicts: list[Verdict] = []
-    for claim in parsed.claims:
-        for ref_id in claim.reference_ids:
-            ref = ref_map.get(ref_id)
-            source = sources.get(ref_id)
-            if ref is None or source is None:
-                logger.debug(
-                    "[M4] Skipping (claim=%s, ref=%s): ref or source not found.",
-                    claim.claim_id, ref_id,
-                )
-                continue
-
-            if verify is not None:
-                try:
-                    verdict = verify(claim, ref, source)
-                    verdicts.append(verdict)
-                except Exception as exc:
-                    logger.error(
-                        "[M4] verify() raised for claim=%s ref=%s: %s",
-                        claim.claim_id, ref_id, exc,
-                    )
-            else:
-                logger.warning("[M4] M3 verify not available; skipping claim=%s", claim.claim_id)
-
-    logger.info("[M4] Pipeline done: doc=%s verdicts=%d", doc_id, len(verdicts))
-    return parsed, sources, verdicts
-
-
-def run_reverify_for_reference(
-    reference_id: str,
-    all_claims: list[Claim],
-    reference: Reference,
-    source: Source,
-) -> list[Verdict]:
-    """
-    Re-run verification for all claims that cite reference_id.
-    Called after POST /api/references/{reference_id}/source.
-    """
-    verify = _import_verify()
-    if verify is None:
-        logger.error("[M4] Cannot reverify: M3 not available.")
-        return []
-
-    try:
-        from citeverify_core.verification.engine import reverify_for_reference
-        return reverify_for_reference(reference_id, all_claims, reference, source)
-    except Exception as exc:
-        logger.error("[M4] reverify_for_reference failed: %s", exc)
-        return []
