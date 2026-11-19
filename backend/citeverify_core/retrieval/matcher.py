@@ -47,8 +47,35 @@ def _first_surname(authors: list[str]) -> str:
 
 
 def title_ratio(ref_title: str, cand_title: str) -> float:
-    """Return rapidfuzz token_set_ratio (0-100) between two titles."""
-    return fuzz.token_set_ratio(_normalise_title(ref_title), _normalise_title(cand_title))
+    """Return a composite title similarity score (0-100).
+
+    Uses ``token_set_ratio`` for vocabulary overlap, but penalises extreme
+    length mismatches so that a 2-word title cannot absorb a 10-word title.
+
+    Length-penalty rule: if the shorter title is fewer than 40% of the
+    longer title's word count, the raw ``token_set_ratio`` is multiplied
+    by  (short_wc / (0.4 * long_wc)) so the final score is capped below
+    the threshold.  This prevents "About Unicorns" matching
+    "Completely Nonexistent Paper About Invisible Unicorns 2099 XYZZY".
+    """
+    n_ref = _normalise_title(ref_title)
+    n_cand = _normalise_title(cand_title)
+    raw = fuzz.token_set_ratio(n_ref, n_cand)
+
+    # Length-mismatch penalty
+    ref_wc = len(n_ref.split())
+    cand_wc = len(n_cand.split())
+    if ref_wc > 0 and cand_wc > 0:
+        shorter = min(ref_wc, cand_wc)
+        longer = max(ref_wc, cand_wc)
+        length_ratio = shorter / longer  # 0..1
+        MIN_LENGTH_RATIO = 0.40
+        if length_ratio < MIN_LENGTH_RATIO:
+            # scale raw score down proportionally
+            penalty = length_ratio / MIN_LENGTH_RATIO  # 0..1
+            raw = raw * penalty
+
+    return raw
 
 
 def year_matches(ref_year: int | None, cand_year: int | None) -> bool:

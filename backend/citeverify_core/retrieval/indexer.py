@@ -1,31 +1,28 @@
 """
 M2 – BM25 index builder and searcher.
 
-Storage layout (unchanged from cosine version; M3 / M4 see the same interface):
+Storage layout:
   data/cache/index/{reference_id}/bm25_corpus.json  – tokenised corpus list
   data/cache/index/{reference_id}/metadata.json     – list of chunk dicts
 
 Search: BM25Okapi from rank-bm25.
 
 ## Score scale (important for M3)
-BM25 raw scores are non-negative floats with **no fixed upper bound** – they depend
-on corpus size, term frequency, document length, and k1/b parameters.  Raw scores
-are NOT 0-1 cosine similarities.
 
-Normalisation applied here:
-  score_norm = raw_score / (raw_score + 1)   [hyperbolic normalisation]
+``cosine_search`` returns **raw** BM25Okapi scores.  These are non-negative
+floats with no fixed upper bound.
 
-This maps [0, +inf) monotonically into [0, 1) with the following properties:
-  - Score 0  → 0.0  (no term overlap at all)
-  - Score 1  → 0.5
-  - Score 10 → 0.91
-  - Score ∞  → 1.0  (theoretical limit, never reached)
+Per-query max normalisation is applied in ``search_passages`` (passage_search.py):
 
-A passage with score_norm < 0.35 (LOW_RETRIEVAL_THRESHOLD) means very weak BM25
-match – typically fewer than 2–3 overlapping content words.  M3 should treat
-this the same as a low cosine score and add the ``low_retrieval_score`` flag.
+    score_norm = raw_score / max(raw_scores_in_this_query)
 
-The embeddings.npy file is NOT written by this implementation.
+This maps every query result to [0, 1] where:
+  - 1.0  = the best-matching passage for this query
+  - 0.0  = a passage with no token overlap
+  - Any value < LOW_RETRIEVAL_THRESHOLD (0.35) is flagged "low_retrieval_score"
+
+The ``_normalise_score`` helper below is kept for unit tests only.
+M3 must NOT re-normalise scores that come from ``search_passages``.
 """
 from __future__ import annotations
 
@@ -124,28 +121,38 @@ def index_exists(reference_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Search
+# Normalisation helper (kept for unit tests; real callers use search_passages)
 # ---------------------------------------------------------------------------
 
-def _normalise_score(raw: float) -> float:
-    """Map BM25 raw score [0, +inf) to [0, 1) via hyperbolic normalisation.
+def _normalise_score(raw: float, max_raw: float = 1.0) -> float:
+    """Per-query max normalisation: raw / max_raw, clamped to [0, 1].
 
-    score_norm = raw / (raw + 1)
-
-    This is monotone, so ranking is preserved.  See module docstring for
-    the mapping table and what the threshold 0.35 means in practice.
+    Parameters
+    ----------
+    raw:
+        Raw BM25 score for one passage.
+    max_raw:
+        The maximum raw score in this query's result set.
+        Pass 1.0 for the unit-test identity case.
     """
-    return raw / (raw + 1.0) if raw > 0 else 0.0
+    if max_raw <= 0:
+        return 0.0
+    return float(min(1.0, raw / max_raw))
 
+
+# ---------------------------------------------------------------------------
+# Search  (returns RAW BM25 scores; normalisation happens in search_passages)
+# ---------------------------------------------------------------------------
 
 def cosine_search(
     reference_id: str,
     query: str,
     k: int = TOP_K,
 ) -> list[tuple[dict, float]]:
-    """Return top-*k* (metadata_dict, score_norm) pairs for *query*.
+    """Return top-*k* (metadata_dict, raw_bm25_score) pairs for *query*.
 
-    ``score_norm`` is the hyperbolic-normalised BM25 score in [0, 1).
+    Scores are **raw** BM25Okapi values in [0, +∞).
+    Per-query normalisation to [0, 1] is done by ``search_passages``.
     Returns an empty list if the index is not built or the query fails.
     """
     index = load_index(reference_id)
@@ -170,8 +177,10 @@ def cosine_search(
             return [(metadata[i], 0.0) for i in range(min(k, len(metadata)))]
         raw_scores: list[float] = bm25.get_scores(query_tokens).tolist()
         # Sort by raw score descending, take top-k
-        top_indices = sorted(range(len(raw_scores)), key=lambda i: raw_scores[i], reverse=True)[:k]
-        return [(metadata[i], _normalise_score(raw_scores[i])) for i in top_indices]
+        top_indices = sorted(
+            range(len(raw_scores)), key=lambda i: raw_scores[i], reverse=True
+        )[:k]
+        return [(metadata[i], raw_scores[i]) for i in top_indices]
     except Exception as exc:
         logger.error("BM25 search failed for %s: %s", reference_id, exc)
         return []
