@@ -7,8 +7,10 @@ POST /api/references/{reference_id}/source   – manual PDF upload
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
+from typing import cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -34,8 +36,9 @@ def get_source_pdf(reference_id: str, db: Session = Depends(get_db)):
     source_row = db.get(SourceRow, reference_id)
     if source_row is None:
         raise HTTPException(404, f"Source {reference_id!r} not found")
-    import json
-    source = json.loads(source_row.payload)
+
+    raw_payload = cast(str, source_row.payload)
+    source = json.loads(raw_payload)
     pdf_path = source.get("pdf_path")
     if not pdf_path or not Path(pdf_path).is_file():
         raise HTTPException(404, "PDF not available for this source")
@@ -59,12 +62,10 @@ async def upload_manual_source(
 
     Returns immediately (202); processing continues in the background.
     """
-    # Validate reference exists
     ref_row = db.get(ReferenceRow, reference_id)
     if ref_row is None:
         raise HTTPException(404, f"Reference {reference_id!r} not found")
 
-    # Validate file
     fname = file.filename or "source.pdf"
     if not fname.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted")
@@ -73,7 +74,6 @@ async def upload_manual_source(
     if len(content) > settings.max_upload_bytes:
         raise HTTPException(413, f"File exceeds {settings.max_upload_bytes // (1024*1024)} MB limit")
 
-    # Save locally
     dest = settings.sources_dir / reference_id
     dest.mkdir(parents=True, exist_ok=True)
     dest_file = dest / fname
@@ -95,15 +95,15 @@ def _ingest_and_reverify(reference_id: str, pdf_path: str) -> None:
 
     db = SessionLocal()
     try:
-        # M2 ingest_pdf
         try:
             if settings.use_mocks:
+                from citeverify_core.common.schemas import Flags, Reference
                 from app.mocks import mock_retrieve_source
-                import json
+
                 ref_row = db.get(ReferenceRow, reference_id)
                 if ref_row:
-                    from citeverify_core.common.schemas import Reference, Flags
-                    ref = Reference(**json.loads(ref_row.payload))
+                    raw_ref_payload = cast(str, ref_row.payload)
+                    ref = Reference(**json.loads(raw_ref_payload))
                     source = mock_retrieve_source(ref)
                     source.pdf_path = pdf_path
                     source.text_level = "full_text"
@@ -114,6 +114,7 @@ def _ingest_and_reverify(reference_id: str, pdf_path: str) -> None:
                     _upsert_source(db, source)
             else:
                 from citeverify_core.retrieval import ingest_pdf  # type: ignore[import]
+
                 source = ingest_pdf(reference_id=reference_id, pdf_path=pdf_path)
                 _upsert_source(db, source)
         except Exception as exc:
@@ -127,8 +128,9 @@ def _ingest_and_reverify(reference_id: str, pdf_path: str) -> None:
 
 def _upsert_source(db: Session, source) -> None:
     existing = db.get(SourceRow, source.reference_id)
+    payload_json = source.model_dump_json()
     if existing is None:
-        db.add(SourceRow(reference_id=source.reference_id, payload=source.model_dump_json()))
+        db.add(SourceRow(reference_id=source.reference_id, payload=payload_json))
     else:
-        existing.payload = source.model_dump_json()
+        setattr(existing, "payload", payload_json)
     db.commit()
